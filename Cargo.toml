@@ -1,0 +1,8 @@
+[package]
+name = "water_sort"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clipboard-rs = "0.3.2"
+macroquad = "0.4.14"
