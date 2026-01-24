@@ -86,6 +86,17 @@ pub struct Renderer {
     width: f32,
     height: f32,
 }
+const SELECTION_BORDER: f32 = 4.0;
+const TEXT_PADDING: f32 = 10.0;
+const CONTAINER_PADDING_HORIZONTAL: f32 = 10.0;
+const CONTAINER_PADDING_VERTICAL: f32 = 10.0;
+const CONTAINER_LINE_PADDING: f32 = 0.1;
+const BUTTON_PADDING_HORIZONTAL: f32 = 10.0;
+const BUTTON_HEIGHT: f32 = 0.1;
+const SWATCH_HEIGHT: f32 = 0.1;
+const GAMEFIELD_PADDING: f32 = 10.0;
+const OUTER_MARGIN: f32 = 10.0;
+
 impl Renderer {
     pub fn new() -> Self {
         Self {
@@ -113,10 +124,10 @@ impl Renderer {
         if self.x == x && self.y == y && self.width == width && self.height == height {
             return false;
         }
-        self.x = x;
-        self.y = y;
-        self.width = width;
-        self.height = height;
+        self.x = x + OUTER_MARGIN;
+        self.y = y + OUTER_MARGIN;
+        self.width = width - OUTER_MARGIN * 2.0;
+        self.height = height - OUTER_MARGIN * 2.0;
         true
     }
 
@@ -139,14 +150,13 @@ impl Renderer {
         self.draw_order = 0;
 
         clear_background(BLACK);
-        let area_padding = 10.0;
-        let button_area_height = self.height * 0.1;
+        let button_area_height = self.height * BUTTON_HEIGHT;
         let swatch_area_height = if !swatches.is_empty() {
-            self.height * 0.1
+            self.height * SWATCH_HEIGHT
         } else {
             0.0
         };
-        let container_area_height = self.height - button_area_height - swatch_area_height - 2.0 * area_padding;
+        let container_area_height = self.height - button_area_height - swatch_area_height - 2.0 * GAMEFIELD_PADDING;
         self.render_button_lineup(
             buttons,
             selected_button,
@@ -158,7 +168,7 @@ impl Renderer {
             6,
             Rect::new(
                 self.x,
-                self.y + button_area_height + area_padding,
+                self.y + button_area_height + GAMEFIELD_PADDING,
                 self.width,
                 container_area_height,
             ),
@@ -168,7 +178,7 @@ impl Renderer {
             selected_swatch,
             Rect::new(
                 self.x,
-                self.y + button_area_height + container_area_height + 2.0 * area_padding,
+                self.y + button_area_height + container_area_height + 2.0 * GAMEFIELD_PADDING,
                 self.width,
                 swatch_area_height,
             ),
@@ -200,21 +210,26 @@ impl Renderer {
 
         match packet {
             FluidPacket::Empty => {
-                draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 2.0, GRAY);
+                draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 2.0, DARKGRAY);
             }
             FluidPacket::Fluid { color_id: _ } => {
                 let color = packet.get_color().unwrap_or(WHITE);
                 draw_rectangle(rect.x, rect.y, rect.w, rect.h, color);
-                draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 2.0, BLACK);
+                let text_rect = Rect::new(
+                    rect.x + TEXT_PADDING,
+                    rect.y + TEXT_PADDING,
+                    rect.w - 2.0 * TEXT_PADDING,
+                    rect.h - 2.0 * TEXT_PADDING,
+                );
                 self.render_text(
                     &packet.get_letter_representation(),
-                    rect,
+                    text_rect,
                     WHITE,
                 );
             }
         }
         if selected {
-            draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 4.0, WHITE);
+            draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, SELECTION_BORDER, WHITE);
         }
     }
     pub fn render_container(
@@ -236,19 +251,26 @@ impl Renderer {
         let packet_height = rect.h / container.get_capacity() as f32;
         for (i, packet) in container.get_packets().iter().enumerate() {
             let packet_y = rect.y + rect.h - (i as f32 + 1.0) * packet_height;
-            self.render_packet(
-                packet,
-                false,
-                Rect::new(rect.x, packet_y, rect.w, packet_height),
-                Some(HitItem::PacketInContainer {
-                    container_index,
-                    packet_index: i,
-                }),
-            );
+            if !packet.is_empty() {
+                self.render_packet(
+                    packet,
+                    false,
+                    Rect::new(rect.x, packet_y, rect.w, packet_height),
+                    Some(HitItem::PacketInContainer {
+                        container_index,
+                        packet_index: i,
+                    }),
+                );
+            }
+            if i < container.get_capacity() - 1 {
+                let left_edge = rect.x + (rect.w * CONTAINER_LINE_PADDING);
+                let right_edge = rect.x + rect.w - (rect.w * CONTAINER_LINE_PADDING);
+                draw_line(left_edge, packet_y, right_edge, packet_y, 2.0, DARKGRAY);
+            }
         }
-        draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 3.0, BLACK);
+        draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 3.0, DARKGRAY);
         if selected {
-            draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 4.0, WHITE);
+            draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, SELECTION_BORDER, WHITE);
         }
     }
     pub fn render_container_lineup(
@@ -259,12 +281,11 @@ impl Renderer {
         rect: Rect,
     ) {
         let container_count = containers.len() as f32;
-        let spacing = 10.0;
-        let total_spacing = spacing * (container_count - 1.0);
+        let total_spacing = CONTAINER_PADDING_HORIZONTAL * (container_count - 1.0);
         let container_width = (rect.w - total_spacing) / container_count;
         for (i, container) in containers.iter().enumerate() {
             let container_index = start_index + i;
-            let container_x = rect.x + i as f32 * (container_width + spacing);
+            let container_x = rect.x + i as f32 * (container_width + CONTAINER_PADDING_HORIZONTAL);
             self.render_container(
                 container,
                 container_index,
@@ -285,8 +306,7 @@ impl Renderer {
             return;
         }
         let rows = container_count.div_ceil(max_columns);
-        let spacing = 10.0;
-        let total_spacing_y = spacing * (rows as f32 - 1.0);
+        let total_spacing_y = CONTAINER_PADDING_VERTICAL * (rows as f32 - 1.0);
         let container_height = (rect.h - total_spacing_y) / rows as f32;
         let columns = container_count.div_ceil(rows);
 
@@ -301,7 +321,7 @@ impl Renderer {
                     None
                 }
             });
-            let container_y = rect.y + row as f32 * (container_height + spacing);
+            let container_y = rect.y + row as f32 * (container_height + CONTAINER_PADDING_VERTICAL);
             self.render_container_lineup(
                 &row_containers,
                 selected_in_row,
@@ -344,13 +364,19 @@ impl Renderer {
 
         draw_rectangle(rect.x, rect.y, rect.w, rect.h, button.get_color());
         draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 2.0, BLACK);
+        let text_rect = Rect::new(
+            rect.x + TEXT_PADDING,
+            rect.y + TEXT_PADDING,
+            rect.w - 2.0 * TEXT_PADDING,
+            rect.h - 2.0 * TEXT_PADDING,
+        );
         self.render_text(
             button.get_label(),
-            rect,
+            text_rect,
             WHITE,
         );
         if selected {
-            draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 4.0, WHITE);
+            draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, SELECTION_BORDER, WHITE);
         }
     }
     pub fn render_button_lineup(
@@ -363,11 +389,10 @@ impl Renderer {
         if button_count == 0.0 {
             return;
         }
-        let spacing = 10.0;
-        let total_spacing = spacing * (button_count - 1.0);
+        let total_spacing = BUTTON_PADDING_HORIZONTAL * (button_count - 1.0);
         let button_width = (rect.w - total_spacing) / button_count;
         for (i, button) in buttons.iter().enumerate() {
-            let button_x = rect.x + i as f32 * (button_width + spacing);
+            let button_x = rect.x + i as f32 * (button_width + BUTTON_PADDING_HORIZONTAL);
             self.render_button(
                 button,
                 Some(i) == selected,
