@@ -119,13 +119,13 @@ impl GameEngine {
         );
     }
 
-    pub fn handle_click(&mut self, x: f32, y: f32) {
+    pub fn handle_click(&mut self, x: f32, y: f32, is_right_click: bool) {
         if let Some(hit) = self.renderer.get_hit_test_registry().hit_test(x, y) {
-            self.handle_hit_item(hit.item);
+            self.handle_hit_item(hit.item, is_right_click);
         }
     }
 
-    fn handle_hit_item(&mut self, item: HitItem) {
+    fn handle_hit_item(&mut self, item: HitItem, is_right_click: bool) {
         let action = match &item {
             HitItem::Button { function } => {
                 *function
@@ -141,6 +141,8 @@ impl GameEngine {
                     Selection::Container(from_index) => {
                         if from_index == index {
                             ControlAction::Deselect
+                        } else if is_right_click {
+                            ControlAction::ReversePour(*from_index, *index, 1)
                         } else {
                             ControlAction::PourInto(*from_index, *index)
                         }
@@ -151,7 +153,7 @@ impl GameEngine {
                 }
             }
             HitItem::PacketInContainer { container_index: index, packet_index: _ } => {
-                self.handle_hit_item(HitItem::Container { index: *index });
+                self.handle_hit_item(HitItem::Container { index: *index }, is_right_click);
                 return;
             }
             HitItem::Swatch { index } => {
@@ -179,6 +181,18 @@ impl GameEngine {
     }
 
     pub fn handle_game_action(&mut self, action: ControlAction) {
+        if matches!(action, 
+            ControlAction::PasteState|
+            ControlAction::AddColor(_,_)|
+            ControlAction::RemoveColor(_)|
+            ControlAction::AddContainer|
+            ControlAction::RemoveContainer|
+            ControlAction::ExpandContainer|
+            ControlAction::ShrinkContainer|
+            ControlAction::ReversePour(_, _, _)
+        ) && !self.is_editor_mode() {
+            return;
+        }
         match action {
             ControlAction::SelectColor(index) => {
                 self.selected = Selection::Color(index);
@@ -217,6 +231,7 @@ impl GameEngine {
                 let repr = self.state.get_text_representation();
                 self.set_clipboard(&repr);
             }
+            // Everything past this point requires editor mode 
             ControlAction::PasteState => {
                 self.push_undo_state();
                 let repr = self.get_clipboard();
@@ -251,6 +266,21 @@ impl GameEngine {
                 if let Selection::Container(index) = self.selected {
                     self.state.fluid_containers[index].change_capacity(-1);
                 }
+            }
+            ControlAction::ReversePour(from, to, amount) => {
+                if !self.state.fluid_containers[from].could_reverse_pour_into(&self.state.fluid_containers[to]) {
+                    self.handle_game_action(ControlAction::SelectContainer(to));
+                    return;
+                }
+                self.push_undo_state();
+                if from < to {
+                    let (left, right) = self.state.fluid_containers.split_at_mut(to);
+                    left[from].reverse_pour_into(&mut right[0], amount);
+                } else {
+                    let (left, right) = self.state.fluid_containers.split_at_mut(from);
+                    right[0].reverse_pour_into(&mut left[to], amount);
+                };
+                self.handle_game_action(ControlAction::Deselect);
             }
         }
         self.render();

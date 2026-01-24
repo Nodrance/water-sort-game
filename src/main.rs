@@ -13,7 +13,11 @@ async fn main() {
         engine.render();
         if is_mouse_button_pressed(MouseButton::Left) {
             let (x, y) = mouse_position();
-            engine.handle_click(x, y);
+            engine.handle_click(x, y, false);
+        }
+        if is_mouse_button_pressed(MouseButton::Right) {
+            let (x, y) = mouse_position();
+            engine.handle_click(x, y, true);
         }
         next_frame().await;
     }

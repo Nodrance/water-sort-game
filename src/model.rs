@@ -227,6 +227,10 @@ impl FluidContainer {
         self.capacity
     }
 
+    pub fn get_filled_amount(&self) -> usize {
+        self.get_capacity() - self.get_empty_space()
+    }
+
     pub fn get_top_fluid(&self) -> Option<FluidPacket> {
         for packet in self.packets.iter().rev() {
             if let FluidPacket::Fluid { color_id: _ } = packet {
@@ -260,30 +264,57 @@ impl FluidContainer {
         &self.packets
     }
 
-    pub fn could_pour_into(&self, other: &FluidContainer) -> bool {
+    pub fn get_pourable_amount(&self, other: &FluidContainer) -> usize {
         if self.get_top_fluid() != other.get_top_fluid() && !other.is_empty() {
-            return false;
+            return 0;
         }
         let depth = self.get_top_fluid_depth();
         let space = other.get_empty_space();
-        depth.min(space) > 0
+        depth.min(space)
+    }
+
+    pub fn could_pour_into(&self, other: &FluidContainer) -> bool {
+        self.get_pourable_amount(other) > 0
     }
 
     pub fn pour_into(&mut self, other: &mut FluidContainer) -> bool {
-        let mut pushed_anything = false;
-        if self.get_top_fluid() != other.get_top_fluid() && !other.is_empty() {
+        let transfer_amount = self.get_pourable_amount(other);
+        if transfer_amount == 0 {
             return false;
         }
-        let depth = self.get_top_fluid_depth();
-        let space = other.get_empty_space();
-        let transfer_amount = depth.min(space);
         for _ in 0..transfer_amount {
             if let Some(packet) = self.pop_fluid() {
                 other.push_fluid(packet);
-                pushed_anything = true;
             }
         }
-        pushed_anything
+        true
+    }
+    
+    pub fn could_reverse_pour_into(&self, other: &FluidContainer) -> bool {
+        self.get_reverse_pourable_amount(other) > 0
+    }
+
+    pub fn get_reverse_pourable_amount(&self, other: &FluidContainer) -> usize {
+        let space = other.get_empty_space();
+        let mut self_depth = self.get_top_fluid_depth();
+        if self_depth != self.get_filled_amount() { // Need to leave at least one packet behind to pour back, or empty
+            self_depth -= 1;
+        }
+        space.min(self_depth)
+    }
+
+
+    pub fn reverse_pour_into(&mut self, other: &mut FluidContainer, amount: usize) -> bool {
+        let transfer_amount = self.get_reverse_pourable_amount(other).min(amount);
+        if transfer_amount == 0 {
+            return false;
+        }
+        for _ in 0..transfer_amount {
+            if let Some(packet) = self.pop_fluid() {
+                other.add_fluid(packet);
+            }
+        }
+        true
     }
 
     pub fn get_text_representation(&self) -> String {
@@ -303,6 +334,7 @@ pub enum ControlAction {
     SelectContainer(usize),
     Deselect,
     PourInto(usize,usize),
+    ReversePour(usize,usize,usize),
     Undo,
     Redo,
     ToggleEditor,
