@@ -233,7 +233,9 @@ impl GameEngine {
             }
             // Everything past this point requires editor mode 
             ControlAction::PasteState => {
-                self.push_undo_state();
+                if !self.undo_stack.is_empty() {
+                    self.push_undo_state();
+                }
                 let repr = self.get_clipboard();
                 let new_state = GameState::new_from_repr(&repr);
                 self.load_state(new_state);
