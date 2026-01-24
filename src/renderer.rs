@@ -314,17 +314,10 @@ impl Renderer {
             let start_idx = row * columns;
             let end_idx = (start_idx + columns).min(container_count);
             let row_containers: Vec<_> = containers[start_idx..end_idx].to_vec();
-            let selected_in_row = selected.and_then(|sel_idx| {
-                if sel_idx >= start_idx && sel_idx < end_idx {
-                    Some(sel_idx - start_idx)
-                } else {
-                    None
-                }
-            });
             let container_y = rect.y + row as f32 * (container_height + CONTAINER_PADDING_VERTICAL);
             self.render_container_lineup(
                 &row_containers,
-                selected_in_row,
+                selected,
                 start_idx,
                 Rect::new(rect.x, container_y, rect.w, container_height),
             );
