@@ -193,21 +193,21 @@ impl FluidContainer {
     }
 
     pub fn push_fluid(&mut self, packet: FluidPacket) -> bool {
-        if self.is_empty() || self.get_top_fluid() == Some(packet) {
+        if self.is_empty() || self.get_top_fluid() == packet {
             return self.add_fluid(packet);
         }
         false
     }
 
-    pub fn pop_fluid(&mut self) -> Option<FluidPacket> {
+    pub fn pop_fluid(&mut self) -> FluidPacket {
         for packet in self.packets.iter_mut().rev() {
             if let FluidPacket::Fluid { color_id } = packet {
                 let color_id = *color_id;
                 *packet = FluidPacket::Empty;
-                return Some(FluidPacket::Fluid { color_id });
+                return FluidPacket::Fluid { color_id };
             }
         }
-        None
+        FluidPacket::Empty
     }
 
     #[allow(dead_code)]
@@ -231,13 +231,13 @@ impl FluidContainer {
         self.get_capacity() - self.get_empty_space()
     }
 
-    pub fn get_top_fluid(&self) -> Option<FluidPacket> {
+    pub fn get_top_fluid(&self) -> FluidPacket {
         for packet in self.packets.iter().rev() {
             if let FluidPacket::Fluid { color_id: _ } = packet {
-                return Some(*packet);
+                return *packet;
             }
         }
-        None
+        FluidPacket::Empty
     }
 
     pub fn get_top_fluid_depth(&self) -> usize {
@@ -283,9 +283,8 @@ impl FluidContainer {
             return false;
         }
         for _ in 0..transfer_amount {
-            if let Some(packet) = self.pop_fluid() {
-                other.push_fluid(packet);
-            }
+            let packet = self.pop_fluid();
+            other.push_fluid(packet);
         }
         true
     }
@@ -310,9 +309,8 @@ impl FluidContainer {
             return false;
         }
         for _ in 0..transfer_amount {
-            if let Some(packet) = self.pop_fluid() {
-                other.add_fluid(packet);
-            }
+            let packet = self.pop_fluid();
+            other.add_fluid(packet);
         }
         true
     }
@@ -337,6 +335,7 @@ pub enum ControlAction {
     ReversePour(usize,usize,usize),
     Undo,
     Redo,
+    Reset,
     ToggleEditor,
     CopyState,
     // Editor actions

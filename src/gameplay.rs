@@ -4,6 +4,13 @@ use crate::model::*;
 use crate::renderer::Renderer;
 use clipboard_rs::{Clipboard, ClipboardContext};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MoveAction {
+    pub from_container: usize,
+    pub to_container: usize,
+    pub amount: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GameState {
     pub fluid_containers: Vec<FluidContainer>,
@@ -30,6 +37,102 @@ impl GameState {
         }
         out
     }
+    
+    pub fn available_colors(&self) -> Vec<usize> {
+        let mut colors = vec![];
+        for container in &self.fluid_containers {
+            for packet in container.get_packets() {
+                if let FluidPacket::Fluid { color_id } = packet && !colors.contains(color_id) {
+                    colors.push(*color_id);
+                }
+            }
+        }
+        colors
+    }
+
+    pub fn top_colors(&self) -> Vec<usize> {
+        let mut colors = vec![];
+        for container in &self.fluid_containers {
+            let packet = container.get_top_fluid();
+            if let FluidPacket::Fluid { color_id } = packet {
+                colors.push(color_id);
+            }
+        }
+        colors
+    }
+
+    pub fn get_possible_moves(&self) -> Vec<MoveAction> {
+        let mut moves = vec![];
+        for color in self.top_colors() {
+            for (from_index, from_container) in self.fluid_containers.iter().enumerate() {
+                if from_container.is_empty() || from_container.get_top_fluid() != FluidPacket::new(color) {
+                    continue;
+                }
+                for (to_index, to_container) in self.fluid_containers.iter().enumerate() {
+                    if from_index == to_index {
+                        continue;
+                    }
+                    let amount = from_container.get_pourable_amount(to_container);
+                    if amount > 0 {
+                        moves.push(MoveAction {
+                            from_container: from_index,
+                            to_container: to_index,
+                            amount,
+                        });
+                    }
+                }
+            }
+        }
+        moves
+    }
+    pub fn get_possible_reverse_moves(&self) -> Vec<MoveAction> {
+        let mut moves = vec![];
+        for color in self.top_colors() {
+            for (from_index, from_container) in self.fluid_containers.iter().enumerate() {
+                if from_container.is_empty() || from_container.get_top_fluid() != FluidPacket::new(color) {
+                    continue;
+                }
+                for (to_index, to_container) in self.fluid_containers.iter().enumerate() {
+                    if from_index == to_index {
+                        continue;
+                    }
+                    let amount = from_container.get_reverse_pourable_amount(to_container);
+                    if amount > 0 {
+                        moves.push(MoveAction {
+                            from_container: from_index,
+                            to_container: to_index,
+                            amount,
+                        });
+                    }
+                }
+            }
+        }
+        moves
+    }
+
+    pub fn apply_move(&mut self, action: &MoveAction) {
+        let from = action.from_container;
+        let to = action.to_container;
+        if from < to {
+            let (left, right) = self.fluid_containers.split_at_mut(to);
+            left[from].pour_into(&mut right[0])
+        } else {
+            let (left, right) = self.fluid_containers.split_at_mut(from);
+            right[0].pour_into(&mut left[to])
+        };
+    }
+    pub fn apply_reverse_move(&mut self, action: &MoveAction) {
+        let from = action.from_container;
+        let to = action.to_container;
+        let amount = action.amount;
+        if from < to {
+            let (left, right) = self.fluid_containers.split_at_mut(to);
+            left[from].reverse_pour_into(&mut right[0], amount);
+        } else {
+            let (left, right) = self.fluid_containers.split_at_mut(from);
+            right[0].reverse_pour_into(&mut left[to], amount);
+        };
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +146,7 @@ enum Selection {
 
 pub struct GameEngine {
     state: GameState,
+    starting_state: GameState,
     swatch_colors: Vec<FluidPacket>,
     buttons: Vec<Button>,
     renderer: Renderer,
@@ -76,9 +180,11 @@ impl GameEngine {
             buttons.push(Button::new("Undo", ControlAction::Undo, FLUID_COLORS[7])); // MAGENTA
             buttons.push(Button::new("Redo", ControlAction::Redo, FLUID_COLORS[8])); // LIME
         }
+        buttons.push(Button::new("Reset", ControlAction::Reset, FLUID_COLORS[9])); // PINK
 
         Self {
-            state: gamestate,
+            state: gamestate.clone(),
+            starting_state: gamestate.clone(),
             swatch_colors,
             buttons,
             renderer: Renderer::new(),
@@ -209,20 +315,21 @@ impl GameEngine {
                     return;
                 }
                 self.push_undo_state();
-                if from < to {
-                    let (left, right) = self.state.fluid_containers.split_at_mut(to);
-                    left[from].pour_into(&mut right[0])
-                } else {
-                    let (left, right) = self.state.fluid_containers.split_at_mut(from);
-                    right[0].pour_into(&mut left[to])
-                };
-                self.handle_game_action(ControlAction::Deselect);
+                self.state.apply_move(&MoveAction {
+                    from_container: from,
+                    to_container: to,
+                    amount: 0,
+                });
             }
             ControlAction::Undo => {
                 self.undo();
             }
             ControlAction::Redo => {
                 self.redo();
+            }
+            ControlAction::Reset => {
+                self.push_undo_state();
+                self.load_state(self.starting_state.clone());
             }
             ControlAction::ToggleEditor => {
                 self.editor_mode = !self.is_editor_mode();
@@ -239,6 +346,7 @@ impl GameEngine {
                 let repr = self.get_clipboard();
                 let new_state = GameState::new_from_repr(&repr);
                 self.load_state(new_state);
+                self.starting_state = self.state.clone();
             }
             ControlAction::AddColor(container_id, color_id) => {
                 self.push_undo_state();
@@ -275,14 +383,11 @@ impl GameEngine {
                     return;
                 }
                 self.push_undo_state();
-                if from < to {
-                    let (left, right) = self.state.fluid_containers.split_at_mut(to);
-                    left[from].reverse_pour_into(&mut right[0], amount);
-                } else {
-                    let (left, right) = self.state.fluid_containers.split_at_mut(from);
-                    right[0].reverse_pour_into(&mut left[to], amount);
-                };
-                self.handle_game_action(ControlAction::Deselect);
+                self.state.apply_reverse_move(&MoveAction {
+                    from_container: from,
+                    to_container: to,
+                    amount,
+                });
             }
         }
         self.render();
