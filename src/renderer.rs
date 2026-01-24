@@ -141,7 +141,11 @@ impl Renderer {
         clear_background(BLACK);
         let area_padding = 10.0;
         let button_area_height = self.height * 0.1;
-        let swatch_area_height = self.height * 0.1;
+        let swatch_area_height = if !swatches.is_empty() {
+            self.height * 0.1
+        } else {
+            0.0
+        };
         let container_area_height = self.height - button_area_height - swatch_area_height - 2.0 * area_padding;
         self.render_button_lineup(
             buttons,
