@@ -73,7 +73,7 @@ impl CachedTextSizer {
         let final_width = size_x * (optimal_size / reference_size as f32);
         let final_height = size_y * (optimal_size / reference_size as f32);
         let offset_x = (rect_width - final_width) / 2.0;
-        let offset_y = (rect_height - final_height) / 2.0;
+        let offset_y = (rect_height + final_height) / 2.0;
         (optimal_size, offset_x, offset_y)
     }
 }
@@ -151,7 +151,7 @@ impl Renderer {
         self.render_container_grid(
             containers,
             selected_container,
-            4,
+            6,
             Rect::new(
                 self.x,
                 self.y + button_area_height + area_padding,
@@ -198,12 +198,12 @@ impl Renderer {
             FluidPacket::Empty => {
                 draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 2.0, GRAY);
             }
-            FluidPacket::Fluid { color_id } => {
+            FluidPacket::Fluid { color_id: _ } => {
                 let color = packet.get_color().unwrap_or(WHITE);
                 draw_rectangle(rect.x, rect.y, rect.w, rect.h, color);
                 draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 2.0, BLACK);
                 self.render_text(
-                    &format!("Fluid: {}", color_id),
+                    &packet.get_letter_representation(),
                     rect,
                     WHITE,
                 );
@@ -277,14 +277,18 @@ impl Renderer {
         rect: Rect,
     ) {
         let container_count = containers.len();
+        if container_count == 0 {
+            return;
+        }
         let rows = container_count.div_ceil(max_columns);
         let spacing = 10.0;
         let total_spacing_y = spacing * (rows as f32 - 1.0);
         let container_height = (rect.h - total_spacing_y) / rows as f32;
+        let columns = container_count.div_ceil(rows);
 
         for row in 0..rows {
-            let start_idx = row * max_columns;
-            let end_idx = (start_idx + max_columns).min(container_count);
+            let start_idx = row * columns;
+            let end_idx = (start_idx + columns).min(container_count);
             let row_containers: Vec<_> = containers[start_idx..end_idx].to_vec();
             let selected_in_row = selected.and_then(|sel_idx| {
                 if sel_idx >= start_idx && sel_idx < end_idx {
@@ -309,6 +313,9 @@ impl Renderer {
         rect: Rect,
     ) {
         let swatch_count = swatches.len() as f32;
+        if swatch_count == 0.0 {
+            return;
+        }
         let spacing = 5.0;
         let total_spacing = spacing * (swatch_count - 1.0);
         let swatch_width = (rect.w - total_spacing) / swatch_count;
@@ -326,11 +333,10 @@ impl Renderer {
         &mut self,
         button: &Button,
         selected: bool,
-        index: usize,
         rect: Rect,
     ) {
         let order = self.next_order();
-        self.hit_test.push(rect, HitItem::Button { index }, order);
+        self.hit_test.push(rect, HitItem::Button { function: button.get_action() }, order);
 
         draw_rectangle(rect.x, rect.y, rect.w, rect.h, button.get_color());
         draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 2.0, BLACK);
@@ -350,6 +356,9 @@ impl Renderer {
         rect: Rect,
     ) {
         let button_count = buttons.len() as f32;
+        if button_count == 0.0 {
+            return;
+        }
         let spacing = 10.0;
         let total_spacing = spacing * (button_count - 1.0);
         let button_width = (rect.w - total_spacing) / button_count;
@@ -358,7 +367,6 @@ impl Renderer {
             self.render_button(
                 button,
                 Some(i) == selected,
-                i,
                 Rect::new(button_x, rect.y, button_width, rect.h),
             );
         }

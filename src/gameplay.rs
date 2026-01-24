@@ -103,7 +103,7 @@ impl GameEngine {
             Selection::None => (None, None, None),
         };
         let containers = &self.state.fluid_containers.iter().collect::<Vec<_>>();
-        let buttons = &self.buttons.iter().filter(|b| b.editor_mode() == self.editor_mode).collect::<Vec<_>>();
+        let buttons = &self.buttons.iter().filter(|b| !b.editor_mode() || self.editor_mode).collect::<Vec<_>>();
         let swatches = if self.editor_mode {
             self.swatch_colors.as_slice()
         } else {
@@ -121,70 +121,61 @@ impl GameEngine {
 
     pub fn handle_click(&mut self, x: f32, y: f32) {
         if let Some(hit) = self.renderer.get_hit_test_registry().hit_test(x, y) {
-            let action = match &hit.item {
-                HitItem::Button { index } => {
-                    self.buttons[*index].get_action()   
-                }
-                HitItem::Container { index } => {
-                    match &self.selected {
-                        Selection::Color(color_index) => {
-                            match self.swatch_colors[*color_index] {
-                                FluidPacket::Empty => ControlAction::RemoveColor(*index),
-                                _ => ControlAction::AddColor(*index, *color_index)
-                            }
-                        }
-                        Selection::Container(from_index) => {
-                            if from_index == index {
-                                ControlAction::Deselect
-                            } else {
-                                ControlAction::PourInto(*from_index, *index)
-                            }
-                        }
-                        Selection::Button(_) | Selection::None => {
-                            ControlAction::SelectContainer(*index)
+            self.handle_hit_item(hit.item);
+        }
+    }
+
+    fn handle_hit_item(&mut self, item: HitItem) {
+        let action = match &item {
+            HitItem::Button { function } => {
+                *function
+            }
+            HitItem::Container { index } => {
+                match &self.selected {
+                    Selection::Color(color_index) => {
+                        match self.swatch_colors[*color_index] {
+                            FluidPacket::Empty => ControlAction::RemoveColor(*index),
+                            FluidPacket::Fluid { color_id } => ControlAction::AddColor(*index, color_id)
                         }
                     }
-                }
-                HitItem::PacketInContainer { container_index: index, packet_index: _ } => {
-                    match &self.selected {
-                        Selection::Color(color_index) => {
-                            ControlAction::AddColor(*index, *color_index)
-                        }
-                        Selection::Container(from_index) => {
-                            if from_index == index {
-                                ControlAction::Deselect
-                            } else {
-                                ControlAction::PourInto(*from_index, *index)
-                            }
-                        }
-                        Selection::Button(_) | Selection::None => {
-                            ControlAction::SelectContainer(*index)
+                    Selection::Container(from_index) => {
+                        if from_index == index {
+                            ControlAction::Deselect
+                        } else {
+                            ControlAction::PourInto(*from_index, *index)
                         }
                     }
+                    Selection::Button(_) | Selection::None => {
+                        ControlAction::SelectContainer(*index)
+                    }
                 }
-                HitItem::Swatch { index } => {
-                    match &self.selected {
-                        Selection::Color(selected_index) => {
-                            if selected_index == index {
-                                ControlAction::Deselect
-                            } else {
-                                ControlAction::SelectColor(*index)
-                            }
-                        }
-                        Selection::Container(selected_index) => {
-                            match self.swatch_colors[*index] {
-                                FluidPacket::Empty => ControlAction::RemoveColor(*selected_index),
-                                _ => ControlAction::AddColor(*selected_index, *index)
-                            }
-                        }
-                        Selection::Button(_) | Selection::None => {
+            }
+            HitItem::PacketInContainer { container_index: index, packet_index: _ } => {
+                self.handle_hit_item(HitItem::Container { index: *index });
+                return;
+            }
+            HitItem::Swatch { index } => {
+                match &self.selected {
+                    Selection::Color(selected_index) => {
+                        if selected_index == index {
+                            ControlAction::Deselect
+                        } else {
                             ControlAction::SelectColor(*index)
                         }
                     }
+                    Selection::Container(selected_index) => {
+                        match self.swatch_colors[*index] {
+                            FluidPacket::Empty => ControlAction::RemoveColor(*selected_index),
+                            FluidPacket::Fluid { color_id } => ControlAction::AddColor(*selected_index, color_id)
+                        }
+                    }
+                    Selection::Button(_) | Selection::None => {
+                        ControlAction::SelectColor(*index)
+                    }
                 }
-            };
-            self.handle_game_action(action);
-        }
+            }
+        };
+        self.handle_game_action(action);
     }
 
     pub fn handle_game_action(&mut self, action: ControlAction) {
@@ -199,17 +190,19 @@ impl GameEngine {
                 self.selected = Selection::None;
             }
             ControlAction::PourInto(from, to) => {
-                if from == to {
+                if !self.state.fluid_containers[from].could_pour_into(&self.state.fluid_containers[to]) {
+                    self.handle_game_action(ControlAction::SelectContainer(to));
                     return;
                 }
                 self.push_undo_state();
                 if from < to {
                     let (left, right) = self.state.fluid_containers.split_at_mut(to);
-                    let _ = left[from].pour_into(&mut right[0]);
-                } else if from > to {
+                    left[from].pour_into(&mut right[0])
+                } else {
                     let (left, right) = self.state.fluid_containers.split_at_mut(from);
-                    let _ = right[0].pour_into(&mut left[to]);
-                }
+                    right[0].pour_into(&mut left[to])
+                };
+                self.handle_game_action(ControlAction::Deselect);
             }
             ControlAction::Undo => {
                 self.undo();

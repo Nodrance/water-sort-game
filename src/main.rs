@@ -9,8 +9,8 @@ use macroquad::prelude::*;
 #[macroquad::main("Fluid Container Simulation")]
 async fn main() {
     let mut engine = GameEngine::new(true);
-    engine.render();
     loop {
+        engine.render();
         if is_mouse_button_pressed(MouseButton::Left) {
             let (x, y) = mouse_position();
             engine.handle_click(x, y);

@@ -260,6 +260,15 @@ impl FluidContainer {
         &self.packets
     }
 
+    pub fn could_pour_into(&self, other: &FluidContainer) -> bool {
+        if self.get_top_fluid() != other.get_top_fluid() && !other.is_empty() {
+            return false;
+        }
+        let depth = self.get_top_fluid_depth();
+        let space = other.get_empty_space();
+        depth.min(space) > 0
+    }
+
     pub fn pour_into(&mut self, other: &mut FluidContainer) -> bool {
         let mut pushed_anything = false;
         if self.get_top_fluid() != other.get_top_fluid() && !other.is_empty() {
@@ -307,7 +316,7 @@ pub enum ControlAction {
     ExpandContainer,
     ShrinkContainer,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Button {
     label: String,
     action: ControlAction,
@@ -335,16 +344,16 @@ impl Button {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum HitItem {
-    Button { index: usize },
+    Button { function: ControlAction },
     Container { index: usize },
     Swatch { index: usize },
     #[allow(dead_code)]
     PacketInContainer { container_index: usize, packet_index: usize }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct HitRecord {
     pub rect: Rect,
     pub item: HitItem,
