@@ -3,7 +3,7 @@ use macroquad::prelude::*;
 pub const FLUID_COLORS: [Color; 32] = [
     Color::new(1.0  , 0.0  , 0.0  , 1.0  ), //RED
     Color::new(0.0  , 0.0  , 1.0  , 1.0  ), //BLUE
-    Color::new(1.0  , 1.0  , 0.0  , 1.0  ), //YELLOW
+    Color::new(0.9  , 0.9  , 0.0  , 1.0  ), //YELLOW
     Color::new(0.0  , 0.5  , 0.0  , 1.0  ), //GREEN
     Color::new(0.627, 0.125, 0.941, 1.0  ), //PURPLE
     Color::new(1.0  , 0.647, 0.0  , 1.0  ), //ORANGE
