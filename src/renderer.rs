@@ -266,7 +266,7 @@ impl Renderer {
                 );
             }
             if i < container.get_capacity() - 1 {
-                if packet_height <= 2.0 && i % (container.get_capacity() / 10) != 0 {
+                if packet_height <= 2.0 && i % (container.get_capacity() / 10 + 1) != 0 {
                     continue;
                 }
                 let left_edge = rect.x + (rect.w * CONTAINER_LINE_PADDING);
