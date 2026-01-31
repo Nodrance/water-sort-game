@@ -1,4 +1,4 @@
-use macroquad::{color, prelude::*};
+use macroquad::{prelude::*};
 
 // FluidPacket
 
@@ -508,21 +508,21 @@ impl GameState {
     }
 
     pub fn is_solvable(&self) -> bool {
-        let mut containers: Vec<usize> = self
+        let containers: Vec<usize> = self
             .fluid_containers
             .iter()
             .map(|c| c.get_capacity())
             .collect();
-        let mut liquids: Vec<usize> = self
+        let liquids: Vec<usize> = self
             .get_available_colors_with_count()
             .iter()
             .map(|(_, count)| *count)
             .collect();
         debug!("Checking solvability with containers: {:?}, liquids: {:?}", containers, liquids);
-        self.recursive_is_solvable(&mut containers, &mut liquids)
+        self.recursive_is_solvable(&containers, &liquids)
     }
 
-    fn recursive_is_solvable(&self, containers: &mut [usize], liquids: &mut Vec<usize>) -> bool {
+    fn recursive_is_solvable(&self, containers: &[usize], liquids: &[usize]) -> bool {
         // A solve only counts if every container is either fully filled with no air, or fully empty,
         // every liquid is fully stored, and different liquids never share a container (no mixing).
 
@@ -535,70 +535,45 @@ impl GameState {
         if total_liquid == 0 {
             return true;
         }
-        if containers.len() < liquids.len() {
-            return false;
-        }
-        liquids.sort();
-        containers.sort();
-        let first_liquid = liquids.pop().unwrap();
-
-        // Enumerate subsets by unique *values* (with multiplicities), so duplicate container
-        // capacities don't create duplicate combinations.
-        let mut freqs: Vec<(usize, usize)> = Vec::new();
+        let first_liquid = liquids[0];
+        let remaining_liquids = &liquids[1..];
+        let mut size_map: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
         for &c in containers.iter() {
-            if let Some((v, count)) = freqs.last_mut() {
-                if *v == c {
-                    *count += 1;
-                    continue;
-                }
-            }
-            freqs.push((c, 1));
+            *size_map.entry(c).or_insert(0) += 1;
         }
+        let container_sizes: Vec<(usize, usize)> = size_map.into_iter().collect();
 
-        // For each unique capacity value, choose 0..=count of that value to be in the subset.
-        // This generates each multiset-subset exactly once.
         fn enumerate_unique_subsets<F>(
-            freqs: &[(usize, usize)],
-            idx: usize,
-            chosen: &mut Vec<usize>,
-            f: &mut F,
+            size_counts: &[(usize, usize)],
+            index: usize,
+            chosen_so_far: &mut Vec<usize>,
+            function: &mut F,
         ) where
             F: FnMut(&[usize]),
         {
-            if idx == freqs.len() {
-                f(chosen);
+            if index == size_counts.len() {
+                function(chosen_so_far);
                 return;
             }
-            let (value, count) = freqs[idx];
-            let base_len = chosen.len();
+            let (value, count) = size_counts[index];
+            let base_len = chosen_so_far.len();
             for k in 0..=count {
-                chosen.truncate(base_len);
-                chosen.extend(std::iter::repeat(value).take(k));
-                enumerate_unique_subsets(freqs, idx + 1, chosen, f);
+                chosen_so_far.truncate(base_len);
+                chosen_so_far.extend(std::iter::repeat_n(value, k));
+                enumerate_unique_subsets(size_counts, index + 1, chosen_so_far, function);
             }
-            chosen.truncate(base_len);
         }
 
-        let mut subset_buf: Vec<usize> = Vec::new();
+        let mut subset_buf: Vec<usize> = Vec::with_capacity(containers.len());
         let mut found = false;
-        enumerate_unique_subsets(&freqs, 0, &mut subset_buf, &mut |subset: &[usize]| {
-            if found {
-                return;
-            }
-            // Skip empty subset to reduce useless work (can't sum to positive liquid).
-            if subset.is_empty() {
-                return;
-            }
-
+        enumerate_unique_subsets(&container_sizes, 0, &mut subset_buf, &mut |subset: &[usize]| {
+            if found {return;}
             let subset_sum: usize = subset.iter().sum();
-            if subset_sum != first_liquid {
-                return;
-            }
+            if subset_sum != first_liquid {return;}
 
-            // Build remaining containers by subtracting chosen multiplicities from freqs.
-            let mut remaining: Vec<usize> = Vec::with_capacity(containers.len().saturating_sub(subset.len()));
+            let mut remaining_containers: Vec<usize> = Vec::with_capacity(containers.len().saturating_sub(subset.len()));
             let mut si = 0usize;
-            for &(value, count) in &freqs {
+            for &(value, count) in &container_sizes {
                 let mut chosen_k = 0usize;
                 while si < subset.len() && subset[si] == value {
                     chosen_k += 1;
@@ -606,11 +581,11 @@ impl GameState {
                 }
                 let left = count.saturating_sub(chosen_k);
                 if left > 0 {
-                    remaining.extend(std::iter::repeat(value).take(left));
+                    remaining_containers.extend(std::iter::repeat_n(value, left));
                 }
             }
 
-            if self.recursive_is_solvable(&mut remaining, &mut liquids.clone()) {
+            if self.recursive_is_solvable(&remaining_containers, remaining_liquids) {
                 found = true;
             }
         });
