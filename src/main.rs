@@ -23,15 +23,10 @@ async fn main() {
             engine.handle_click(x, y, true);
         }
         if is_key_pressed(KeyCode::S) {
-            if let Some(result) = engine.get_state().fast_is_maybe_solvable() {
-                if result {
-                    println!("The current state is solvable.");
-                } else {
-                    println!("The current state is not solvable.");
-                }
-            }
-            else {
-                println!("Could not easily determine solvability of the current state.");
+            if engine.get_state().is_solvable() {
+                println!("The current state is solvable.");
+            } else {
+                println!("The current state is not solvable.");
             }
         }
         next_frame().await;

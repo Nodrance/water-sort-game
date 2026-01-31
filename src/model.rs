@@ -625,6 +625,7 @@ impl GameState {
             .iter()
             .map(|(_, count)| *count)
             .collect();
+        // liquids.sort();
         debug!("Checking full solvability with containers: {:?}, liquids: {:?}", containers, liquids);
         self.recursive_is_solvable(&container_sizes, &liquids)
     }
@@ -632,9 +633,31 @@ impl GameState {
     fn recursive_is_solvable(&self, container_sizes: &[(usize,usize)], liquids: &[usize]) -> bool {
 
         if liquids.is_empty() {
+            debug!("All liquids have been successfully matched.");
             return true;
         }
+        // experimental optimization: check if any liquid cannot possibly fit into any combination of available containers.
+        // let mut reachable_sizes: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        // reachable_sizes.insert(0);
+        // for &(size, count) in container_sizes.iter() {
+        //     let current_sizes: Vec<usize> = reachable_sizes.iter().copied().collect();
+        //     for i in 0..count {
+        //         for &r in current_sizes.iter() {
+        //             reachable_sizes.insert(r + size*(i+1));
+        //         }
+        //     }
+        // }
+        // for liquid_count in liquids.iter() {
+        //     if !reachable_sizes.contains(liquid_count) {
+        //         return false;
+        //     }
+        // }
+        // end optimization
+
         let first_liquid = liquids[0];
+        if first_liquid >= 38 {
+            debug!("Trying to fit liquid of size {}", first_liquid);
+        }
         let remaining_liquids = &liquids[1..];
 
         let mut subset_buffer: Vec<(usize, usize)> = Vec::with_capacity(container_sizes.len());
@@ -642,7 +665,7 @@ impl GameState {
         Self::enumerate_unique_subsets(container_sizes, 0, &mut subset_buffer, &mut |subset: &[(usize, usize)]| {
             let subset_sum: usize = subset.iter().map(|(v, c)| v * c).sum();
             if subset_sum != first_liquid {return false;}
-
+            
             let mut remaining_containers: Vec<(usize, usize)> = container_sizes.to_vec();
             for (value, count) in remaining_containers.iter_mut() {
                 for &(sub_value, sub_count) in subset.iter() {
