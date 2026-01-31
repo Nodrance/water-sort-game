@@ -409,6 +409,10 @@ impl GameState {
         color_counts
     }
 
+    pub fn get_empty_spaces_count(&self) -> usize {
+        self.fluid_containers.iter().map(|c| c.get_empty_space()).sum()
+    }
+
     pub fn get_top_colors(&self) -> Vec<usize> {
         let mut colors = vec![];
         for container in &self.fluid_containers {
@@ -559,6 +563,10 @@ impl GameState {
                 return true;
             }
         }
+        if !reachable_sizes.contains(&self.get_empty_spaces_count()) {
+            // All the empty space must be in containers too
+            return true;
+        }
         false
     }
 
@@ -581,7 +589,7 @@ impl GameState {
     }
 
     fn enumerate_subsets_to_target_size(
-        size_map: &HashMap<usize, usize>,
+        size_vec: &Vec<(usize, usize)>,
         chosen_so_far: &mut HashMap<usize, usize>,
         index: usize,
         target_sizes: &HashSet<usize>,
@@ -589,21 +597,22 @@ impl GameState {
         sum_so_far: usize,
         hashmap_to_add_to: &mut HashMap<usize, Vec<HashMap<usize, usize>>>,
     ) {
-        let (value, count) = size_map.iter().nth(index).unwrap();
-        for k in 0..=*count {
+        let (value, count) = size_vec[index];
+        let map_length = size_vec.len();
+        for k in 0..=count {
             let new_sum = sum_so_far + value * k;
             if new_sum > max_size {
                 return;
             }
-            if index + 1 >= size_map.len() {
+            if index + 1 >= map_length {
                 if target_sizes.contains(&new_sum) {
-                    chosen_so_far.insert(*value, k);
-                    hashmap_to_add_to.entry(new_sum).or_insert_with(Vec::new).push(chosen_so_far.clone());
+                    chosen_so_far.insert(value, k);
+                    hashmap_to_add_to.entry(new_sum).or_default().push(chosen_so_far.clone());
                 }
                 continue;
             }
-            chosen_so_far.insert(*value, k);
-            Self::enumerate_subsets_to_target_size(size_map, chosen_so_far, index + 1, target_sizes, max_size, new_sum, hashmap_to_add_to);
+            chosen_so_far.insert(value, k);
+            Self::enumerate_subsets_to_target_size(size_vec, chosen_so_far, index + 1, target_sizes, max_size, new_sum, hashmap_to_add_to);
         }
     }
 
@@ -626,21 +635,40 @@ impl GameState {
         for &c in containers.iter() {
             *size_map.entry(c).or_insert(0) += 1;
         }
-        let liquids: Vec<usize> = self
+        let mut size_vec: Vec<(usize, usize)> = size_map.iter().map(|(size, count)| (*size, *count)).collect();
+        size_vec.sort_by(|a, b| b.0.cmp(&a.0));
+
+        let mut liquids: Vec<usize> = self
             .get_available_colors_with_count()
             .iter()
             .map(|(_, count)| *count)
             .collect();
-        // liquids.sort();
+        if *liquids.iter().max().unwrap_or(&0) > self.get_empty_spaces_count() {
+            liquids.push(self.get_empty_spaces_count());
+        }
         let liquid_sizes: HashSet<usize> = liquids.iter().copied().collect();
-        let mut ways_to_get_liquids: HashMap<usize,Vec<HashMap<usize,usize>>> = HashMap::with_capacity(liquids.len());
-        for &liquid in liquids.iter() {
+        let mut ways_to_get_liquids: HashMap<usize,Vec<HashMap<usize,usize>>> = HashMap::with_capacity(liquid_sizes.len());
+        for &liquid in liquid_sizes.iter() {
             ways_to_get_liquids.insert(liquid, Vec::new());
         }
-        debug!("Preprocessing for solvability containers: {:?}, liquids: {:?}", containers, liquids);
-        Self::enumerate_subsets_to_target_size(&size_map, &mut HashMap::with_capacity(size_map.len()), 0, &liquid_sizes, *containers.iter().max().unwrap_or(&0), 0, &mut ways_to_get_liquids);
+        Self::enumerate_subsets_to_target_size(
+            &size_vec,
+            &mut HashMap::with_capacity(size_map.len()), 
+            0,
+            &liquid_sizes,
+            *liquid_sizes.iter().max().unwrap_or(&0),
+            0,
+            &mut ways_to_get_liquids,
+        );
         debug!("Solving");
-        self.recursive_is_solvable(&ways_to_get_liquids, size_map, &liquids)
+        let mut lengths = ways_to_get_liquids.iter().map(|(k,v)| (*k, v.len())).collect::<Vec<(usize, usize)>>();
+        lengths.sort_by(|a, b| a.1.cmp(&b.1));
+        debug!("Ways to get liquids sizes: {:?}", lengths);
+        self.recursive_is_solvable(
+            &ways_to_get_liquids,
+            size_map,
+            &liquids
+        )
     }
 
     fn recursive_is_solvable(&self, ways_to_get_liquids: &HashMap<usize, Vec<HashMap<usize, usize>>>, remaining_container_sizes: HashMap<usize, usize>, liquids: &[usize]) -> bool {
