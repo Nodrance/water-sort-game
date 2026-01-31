@@ -507,7 +507,7 @@ impl GameState {
         containers
     }
 
-    pub fn fast_is_definitely_solvable(&self) -> bool {
+    fn fast_is_definitely_solvable(&self) -> bool {
         // Checks if every liquid can perfectly fit into containers of the same size.
         // If this returns true, the puzzle is definitely solvable. If false, may still be solvable.
         // Guaranteed correct if no liquid ends up split across multiple containers.
@@ -528,7 +528,7 @@ impl GameState {
         true
     }
 
-    pub fn fast_is_definitely_unsolvable(&self) -> bool {
+    fn fast_is_definitely_unsolvable(&self) -> bool {
         // Checks if any liquid cannot possibly fit into any combination of available containers.
         // Does not consider that once a container is used for one color, it can't be used for another.
         // If this returns true, the puzzle is definitely unsolvable. If false, may still be unsolvable.
@@ -559,6 +559,24 @@ impl GameState {
         false
     }
 
+    pub fn fast_is_maybe_solvable(&self) -> Option<bool> {
+        // Returns Some(true) if definitely solvable, Some(false) if definitely unsolvable, None if unknown
+        if self.fast_is_definitely_unsolvable() {
+            debug!("Fast definite unsolvability check failed.");
+            return Some(false);
+        }
+        let unique_sizes: std::collections::HashSet<usize> = self.get_container_sizes().iter().copied().collect();
+        if unique_sizes.len() == 1 {
+            debug!("All containers are the same size therefore fast unsolvability checker is accurate.");
+            return Some(true);
+        }
+        if self.fast_is_definitely_solvable() {
+            debug!("Fast definite solvability check passed.");
+            return Some(true);
+        }
+        None
+    }
+
     fn enumerate_unique_subsets<F>(
         size_counts: &[(usize, usize)],
         index: usize,
@@ -583,18 +601,12 @@ impl GameState {
     }
 
     pub fn is_solvable(&self) -> bool {
-        if self.fast_is_definitely_solvable() {
-            debug!("Fast definite solvability check passed.");
-            return true;
-        }
-        if self.fast_is_definitely_unsolvable() {
-            debug!("Fast definite unsolvability check failed.");
-            return false;
-        }
-        let unique_sizes: std::collections::HashSet<usize> = self.get_container_sizes().iter().copied().collect();
-        if unique_sizes.len() == 1 {
-            debug!("All containers are the same size therefore fast unsolvability checker is accurate.");
-            return true;
+        // A full check for solvability using recursive subset enumeration
+        // If this returns true, there is definitely a way to arrange the liquids that is solved, although it might not be reachable entirely by moves.
+        // If false, there is definitely no way to arrange the liquids that is solved.
+        // This is a computationally expensive check, so we first run the fast checks.
+        if let Some(result) = self.fast_is_maybe_solvable() {
+            return result;
         }
         debug!("Proceeding to full solvability check.");
         
@@ -618,8 +630,6 @@ impl GameState {
     }
 
     fn recursive_is_solvable(&self, container_sizes: &[(usize,usize)], liquids: &[usize]) -> bool {
-        // A solve only counts if every container is either fully filled with no air, or fully empty,
-        // every liquid is fully stored, and different liquids never share a container (no mixing).
 
         if liquids.is_empty() {
             return true;
