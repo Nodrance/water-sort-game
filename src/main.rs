@@ -1,8 +1,11 @@
 mod gameplay;
 mod model;
 mod renderer;
+mod solver;
+
 
 use crate::gameplay::*;
+use crate::solver::*;
 
 use macroquad::prelude::*;
 
@@ -18,6 +21,13 @@ async fn main() {
         if is_mouse_button_pressed(MouseButton::Right) {
             let (x, y) = mouse_position();
             engine.handle_click(x, y, true);
+        }
+        if is_key_pressed(KeyCode::S) {
+            if engine.get_state().is_solvable() {
+                println!("The current state is solvable.");
+            } else {
+                println!("The current state is not solvable.");
+            }
         }
         next_frame().await;
     }

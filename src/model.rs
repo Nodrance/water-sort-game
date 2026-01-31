@@ -1,4 +1,6 @@
-use macroquad::prelude::*;
+use macroquad::{color, prelude::*};
+
+// FluidPacket
 
 pub const FLUID_COLORS: [Color; 32] = [
     Color::new(1.0  , 0.0  , 0.0  , 1.0  ), //RED
@@ -35,11 +37,12 @@ pub const FLUID_COLORS: [Color; 32] = [
     Color::new(1.0  , 0.549, 0.0  , 1.0  ), //DARKORANGE
 ];
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, PartialOrd, Ord)]
 pub enum FluidPacket {
     Empty,
     Fluid { color_id: usize },
 }
+
 impl FluidPacket {
     pub fn new(color_id: usize) -> Self {
         FluidPacket::Fluid { color_id }
@@ -77,9 +80,7 @@ impl FluidPacket {
         for ch in s.chars() {
             let digit = Self::letter_to_color_id(ch)?; // 0..25
             // Convert to 1..26 for Excel-style accumulation.
-            acc = acc
-                .checked_mul(26)?
-                .checked_add(digit + 1)?;
+            acc = acc.checked_mul(26)?.checked_add(digit + 1)?;
             saw_any = true;
         }
 
@@ -94,12 +95,14 @@ impl FluidPacket {
     pub fn is_empty(&self) -> bool {
         matches!(self, FluidPacket::Empty)
     }
+
     pub fn get_color_id(&self) -> Option<usize> {
         match self {
             FluidPacket::Fluid { color_id } => Some(*color_id),
             FluidPacket::Empty => None,
         }
     }
+
     pub fn get_letter_representation(&self) -> String {
         let letters = b'A'..=b'Z';
         let letter_vec: Vec<u8> = letters.collect();
@@ -119,21 +122,24 @@ impl FluidPacket {
 
         chars.iter().rev().collect()
     }
+
     pub fn get_color(&self) -> Option<Color> {
         match self {
-            FluidPacket::Fluid { color_id } => Some(
-                FLUID_COLORS[color_id % FLUID_COLORS.len()]
-            ),
+            FluidPacket::Fluid { color_id } => Some(FLUID_COLORS[color_id % FLUID_COLORS.len()]),
             FluidPacket::Empty => None,
         }
     }
 }
+
+// FluidContainer
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FluidContainer {
     packets: Vec<FluidPacket>,
     capacity: usize,
 }
+
+#[allow(dead_code)]
 impl FluidContainer {
     pub fn new(capacity: usize) -> Self {
         Self {
@@ -157,10 +163,7 @@ impl FluidContainer {
             }
         }
         let capacity = packets.len();
-        Self {
-            packets,
-            capacity,
-        }
+        Self { packets, capacity }
     }
 
     pub fn resize(&mut self, new_capacity: usize) {
@@ -175,7 +178,8 @@ impl FluidContainer {
 
     pub fn change_capacity(&mut self, delta: isize) {
         let new_capacity = if delta.is_negative() {
-            self.capacity.saturating_sub(delta.wrapping_abs() as usize)
+            self.capacity
+                .saturating_sub(delta.wrapping_abs() as usize)
         } else {
             self.capacity.saturating_add(delta as usize)
         };
@@ -210,7 +214,6 @@ impl FluidContainer {
         FluidPacket::Empty
     }
 
-    #[allow(dead_code)]
     pub fn is_full(&self) -> bool {
         self.packets.iter().all(|p| !p.is_empty())
     }
@@ -233,7 +236,7 @@ impl FluidContainer {
 
     pub fn get_top_fluid(&self) -> FluidPacket {
         for packet in self.packets.iter().rev() {
-            if let FluidPacket::Fluid { color_id: _ } = packet {
+            if let FluidPacket::Fluid { .. } = packet {
                 return *packet;
             }
         }
@@ -288,7 +291,7 @@ impl FluidContainer {
         }
         true
     }
-    
+
     pub fn could_reverse_pour_into(&self, other: &FluidContainer) -> bool {
         self.get_reverse_pourable_amount(other) > 0
     }
@@ -296,12 +299,12 @@ impl FluidContainer {
     pub fn get_reverse_pourable_amount(&self, other: &FluidContainer) -> usize {
         let space = other.get_empty_space();
         let mut self_depth = self.get_top_fluid_depth();
-        if self_depth != self.get_filled_amount() { // Need to leave at least one packet behind to pour back, or empty
+        // Need to leave at least one packet behind to pour back, or empty.
+        if self_depth != self.get_filled_amount() {
             self_depth -= 1;
         }
         space.min(self_depth)
     }
-
 
     pub fn reverse_pour_into(&mut self, other: &mut FluidContainer, amount: usize) -> bool {
         let transfer_amount = self.get_reverse_pourable_amount(other).min(amount);
@@ -326,13 +329,316 @@ impl FluidContainer {
     }
 }
 
+impl PartialOrd for FluidContainer {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FluidContainer {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.packets.cmp(&other.packets)
+    }
+}
+
+// Game state / moves
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MoveAction {
+    pub from_container: usize,
+    pub to_container: usize,
+    pub amount: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct GameState {
+    pub fluid_containers: Vec<FluidContainer>,
+}
+
+#[allow(dead_code)]
+impl GameState {
+    pub fn new_from_repr(repr: &str) -> Self {
+        let mut fluid_containers: Vec<FluidContainer> = Vec::new();
+
+        for line in repr.lines() {
+            let container = FluidContainer::new_from_repr(line);
+            fluid_containers.push(container);
+        }
+        Self { fluid_containers }
+    }
+
+    pub fn get_text_representation(&self) -> String {
+        let mut out = String::new();
+        for (i, c) in self.fluid_containers.iter().enumerate() {
+            if i > 0 {
+                out.push('\n');
+            }
+            out.push_str(&c.get_text_representation());
+        }
+        out
+    }
+
+    pub fn get_available_colors(&self) -> Vec<usize> {
+        let mut colors = vec![];
+        for container in &self.fluid_containers {
+            for packet in container.get_packets() {
+                if let FluidPacket::Fluid { color_id } = packet && !colors.contains(color_id) {
+                    colors.push(*color_id);
+                }
+            }
+        }
+        colors
+    }
+
+    pub fn get_available_colors_with_count(&self) -> Vec<(usize, usize)> {
+        let mut color_counts = vec![];
+        for container in &self.fluid_containers {
+            for packet in container.get_packets() {
+                if let FluidPacket::Fluid { color_id } = packet {
+                    if let Some((_, count)) = color_counts.iter_mut().find(|(id, _)| *id == *color_id) {
+                        *count += 1;
+                    } else {
+                        color_counts.push((*color_id, 1));
+                    }
+                }
+            }
+        }
+        color_counts
+    }
+
+    pub fn get_top_colors(&self) -> Vec<usize> {
+        let mut colors = vec![];
+        for container in &self.fluid_containers {
+            let packet = container.get_top_fluid();
+            if let FluidPacket::Fluid { color_id } = packet {
+                colors.push(color_id);
+            }
+        }
+        colors
+    }
+
+    pub fn get_container_sizes (&self) -> Vec<usize> {
+        let mut sizes = vec![];
+        for container in &self.fluid_containers {
+            sizes.push(container.get_capacity());
+        }
+        sizes.sort();
+        sizes
+    }
+
+    pub fn get_possible_moves(&self) -> Vec<MoveAction> {
+        let mut moves = vec![];
+        for color in self.get_top_colors() {
+            for (from_index, from_container) in self.fluid_containers.iter().enumerate() {
+                if from_container.is_empty() || from_container.get_top_fluid() != FluidPacket::new(color) {
+                    continue;
+                }
+                for (to_index, to_container) in self.fluid_containers.iter().enumerate() {
+                    if from_index == to_index {
+                        continue;
+                    }
+                    let amount = from_container.get_pourable_amount(to_container);
+                    if amount > 0 {
+                        moves.push(MoveAction {
+                            from_container: from_index,
+                            to_container: to_index,
+                            amount,
+                        });
+                    }
+                }
+            }
+        }
+        moves
+    }
+
+    pub fn get_possible_reverse_moves(&self) -> Vec<MoveAction> {
+        let mut moves = vec![];
+        for color in self.get_top_colors() {
+            for (from_index, from_container) in self.fluid_containers.iter().enumerate() {
+                if from_container.is_empty() || from_container.get_top_fluid() != FluidPacket::new(color) {
+                    continue;
+                }
+                for (to_index, to_container) in self.fluid_containers.iter().enumerate() {
+                    if from_index == to_index {
+                        continue;
+                    }
+                    let amount = from_container.get_reverse_pourable_amount(to_container);
+                    if amount > 0 {
+                        moves.push(MoveAction {
+                            from_container: from_index,
+                            to_container: to_index,
+                            amount,
+                        });
+                    }
+                }
+            }
+        }
+        moves
+    }
+
+    pub fn apply_move(&mut self, action: &MoveAction) {
+        let from = action.from_container;
+        let to = action.to_container;
+        if from < to {
+            let (left, right) = self.fluid_containers.split_at_mut(to);
+            left[from].pour_into(&mut right[0])
+        } else {
+            let (left, right) = self.fluid_containers.split_at_mut(from);
+            right[0].pour_into(&mut left[to])
+        };
+    }
+
+    pub fn apply_reverse_move(&mut self, action: &MoveAction) {
+        let from = action.from_container;
+        let to = action.to_container;
+        let amount = action.amount;
+        if from < to {
+            let (left, right) = self.fluid_containers.split_at_mut(to);
+            left[from].reverse_pour_into(&mut right[0], amount);
+        } else {
+            let (left, right) = self.fluid_containers.split_at_mut(from);
+            right[0].reverse_pour_into(&mut left[to], amount);
+        };
+    }
+
+    pub fn get_sorted_containers(&self) -> Vec<FluidContainer> {
+        let mut containers = self.fluid_containers.clone();
+        containers.sort();
+        containers
+    }
+
+    pub fn is_solvable(&self) -> bool {
+        let mut containers: Vec<usize> = self
+            .fluid_containers
+            .iter()
+            .map(|c| c.get_capacity())
+            .collect();
+        let mut liquids: Vec<usize> = self
+            .get_available_colors_with_count()
+            .iter()
+            .map(|(_, count)| *count)
+            .collect();
+        debug!("Checking solvability with containers: {:?}, liquids: {:?}", containers, liquids);
+        self.recursive_is_solvable(&mut containers, &mut liquids)
+    }
+
+    fn recursive_is_solvable(&self, containers: &mut [usize], liquids: &mut Vec<usize>) -> bool {
+        // A solve only counts if every container is either fully filled with no air, or fully empty,
+        // every liquid is fully stored, and different liquids never share a container (no mixing).
+
+        debug!("Recursive check: containers: {:?}, liquids: {:?}", containers, liquids);
+        let total_liquid: usize = liquids.iter().sum();
+        let total_capacity: usize = containers.iter().sum();
+        if total_liquid > total_capacity {
+            return false;
+        }
+        if total_liquid == 0 {
+            return true;
+        }
+        if containers.len() < liquids.len() {
+            return false;
+        }
+        liquids.sort();
+        containers.sort();
+        let first_liquid = liquids.pop().unwrap();
+
+        // Enumerate subsets by unique *values* (with multiplicities), so duplicate container
+        // capacities don't create duplicate combinations.
+        let mut freqs: Vec<(usize, usize)> = Vec::new();
+        for &c in containers.iter() {
+            if let Some((v, count)) = freqs.last_mut() {
+                if *v == c {
+                    *count += 1;
+                    continue;
+                }
+            }
+            freqs.push((c, 1));
+        }
+
+        // For each unique capacity value, choose 0..=count of that value to be in the subset.
+        // This generates each multiset-subset exactly once.
+        fn enumerate_unique_subsets<F>(
+            freqs: &[(usize, usize)],
+            idx: usize,
+            chosen: &mut Vec<usize>,
+            f: &mut F,
+        ) where
+            F: FnMut(&[usize]),
+        {
+            if idx == freqs.len() {
+                f(chosen);
+                return;
+            }
+            let (value, count) = freqs[idx];
+            let base_len = chosen.len();
+            for k in 0..=count {
+                chosen.truncate(base_len);
+                chosen.extend(std::iter::repeat(value).take(k));
+                enumerate_unique_subsets(freqs, idx + 1, chosen, f);
+            }
+            chosen.truncate(base_len);
+        }
+
+        let mut subset_buf: Vec<usize> = Vec::new();
+        let mut found = false;
+        enumerate_unique_subsets(&freqs, 0, &mut subset_buf, &mut |subset: &[usize]| {
+            if found {
+                return;
+            }
+            // Skip empty subset to reduce useless work (can't sum to positive liquid).
+            if subset.is_empty() {
+                return;
+            }
+
+            let subset_sum: usize = subset.iter().sum();
+            if subset_sum != first_liquid {
+                return;
+            }
+
+            // Build remaining containers by subtracting chosen multiplicities from freqs.
+            let mut remaining: Vec<usize> = Vec::with_capacity(containers.len().saturating_sub(subset.len()));
+            let mut si = 0usize;
+            for &(value, count) in &freqs {
+                let mut chosen_k = 0usize;
+                while si < subset.len() && subset[si] == value {
+                    chosen_k += 1;
+                    si += 1;
+                }
+                let left = count.saturating_sub(chosen_k);
+                if left > 0 {
+                    remaining.extend(std::iter::repeat(value).take(left));
+                }
+            }
+
+            if self.recursive_is_solvable(&mut remaining, &mut liquids.clone()) {
+                found = true;
+            }
+        });
+
+        if found {
+            return true;
+        }
+        false
+    }
+}
+
+impl PartialEq for GameState {
+    fn eq(&self, other: &Self) -> bool {
+        self.get_sorted_containers() == other.get_sorted_containers()
+    }
+}
+
+impl Eq for GameState {}
+
+// Controls / Button
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ControlAction {
     SelectColor(usize),
     SelectContainer(usize),
     Deselect,
-    PourInto(usize,usize),
-    ReversePour(usize,usize,usize),
+    PourInto(usize, usize),
+    ReversePour(usize, usize, usize),
     Undo,
     Redo,
     Reset,
@@ -340,19 +646,21 @@ pub enum ControlAction {
     CopyState,
     // Editor actions
     PasteState,
-    AddColor(usize,usize),
+    AddColor(usize, usize),
     RemoveColor(usize),
     AddContainer,
     RemoveContainer,
     ExpandContainer,
     ShrinkContainer,
 }
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Button {
     label: String,
     action: ControlAction,
     color: Color,
 }
+
 impl Button {
     pub fn new(label: &str, action: ControlAction, color: Color) -> Self {
         Self {
@@ -361,19 +669,34 @@ impl Button {
             color,
         }
     }
+
     pub fn get_action(&self) -> ControlAction {
         self.action
     }
+
     pub fn get_label(&self) -> &str {
         &self.label
     }
+
     pub fn get_color(&self) -> Color {
         self.color
     }
+
     pub fn editor_mode(&self) -> bool {
-        matches!(self.action, ControlAction::AddColor(_,_) | ControlAction::RemoveColor(_) | ControlAction::AddContainer | ControlAction::RemoveContainer | ControlAction::ExpandContainer | ControlAction::ShrinkContainer | ControlAction::PasteState)
+        matches!(
+            self.action,
+            ControlAction::AddColor(_, _)
+                | ControlAction::RemoveColor(_)
+                | ControlAction::AddContainer
+                | ControlAction::RemoveContainer
+                | ControlAction::ExpandContainer
+                | ControlAction::ShrinkContainer
+                | ControlAction::PasteState
+        )
     }
 }
+
+// Hit testing
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum HitItem {
@@ -381,7 +704,10 @@ pub enum HitItem {
     Container { index: usize },
     Swatch { index: usize },
     #[allow(dead_code)]
-    PacketInContainer { container_index: usize, packet_index: usize }
+    PacketInContainer {
+        container_index: usize,
+        packet_index: usize,
+    },
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
