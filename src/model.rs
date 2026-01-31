@@ -507,7 +507,73 @@ impl GameState {
         containers
     }
 
+    fn enumerate_unique_subsets<F>(
+            size_counts: &[(usize, usize)],
+            index: usize,
+            chosen_so_far: &mut Vec<(usize, usize)>,
+            function: &mut F,
+        ) -> bool
+        // returns true to stop enumeration early
+        where
+            F: FnMut(&[(usize, usize)]) -> bool,
+        {
+            if index == size_counts.len() {
+                return function(chosen_so_far);
+            }
+            let (value, count) = size_counts[index];
+            let base_len = chosen_so_far.len();
+            for k in 0..=count {
+                chosen_so_far.truncate(base_len);
+                chosen_so_far.push((value, k));
+                Self::enumerate_unique_subsets(size_counts, index + 1, chosen_so_far, function);
+            }
+            false
+        }
+
+    pub fn simple_is_solvable(&self) -> bool {
+        // Does not consider that once a container is used for one color, it can't be used for another.
+        // Way faster, guaranteed correct if all containers are the same size.
+        // Required but not sufficient for general cases.
+        let containers: Vec<usize> = self
+            .fluid_containers
+            .iter()
+            .map(|c| c.get_capacity())
+            .collect();
+        let mut size_map: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for &c in containers.iter() {
+            *size_map.entry(c).or_insert(0) += 1;
+        }
+        let container_sizes: Vec<(usize, usize)> = size_map.into_iter().collect();
+        let liquids: Vec<usize> = self
+            .get_available_colors_with_count()
+            .iter()
+            .map(|(_, count)| *count)
+            .collect();
+        debug!("Checking solvability with containers: {:?}, liquids: {:?}", container_sizes, liquids);
+        let mut found = false;
+        for liquid_count in liquids.iter() {
+            debug!("Checking for liquid count: {}", liquid_count);
+            let mut subset_buffer: Vec<(usize, usize)> = Vec::with_capacity(container_sizes.len());
+            Self::enumerate_unique_subsets(&container_sizes, 0, &mut subset_buffer, &mut |subset| {
+                // Check if the current subset can accommodate the liquids
+                let subset_sum: usize = subset.iter().map(|(v, c)| v * c).sum();
+                if subset_sum == *liquid_count {
+                    found = true;
+                    return true;
+                }
+                false
+            });
+            if !found {return false;}
+            found = false;
+        }
+        true
+    }
+
     pub fn is_solvable(&self) -> bool {
+        if !self.simple_is_solvable() {
+            debug!("Simple solvability check failed.");
+            return false;
+        }
         let containers: Vec<usize> = self
             .fluid_containers
             .iter()
@@ -531,44 +597,17 @@ impl GameState {
         // A solve only counts if every container is either fully filled with no air, or fully empty,
         // every liquid is fully stored, and different liquids never share a container (no mixing).
 
-        let total_liquid: usize = liquids.iter().sum();
-        if total_liquid == 0 {
+        if liquids.is_empty() {
             return true;
-        }
-        let total_capacity: usize = container_sizes.iter().map(|(v, c)| v * c).sum();
-        if total_liquid > total_capacity {
-            return false;
         }
         let first_liquid = liquids[0];
         let remaining_liquids = &liquids[1..];
 
-        fn enumerate_unique_subsets<F>(
-            size_counts: &[(usize, usize)],
-            index: usize,
-            chosen_so_far: &mut Vec<(usize, usize)>,
-            function: &mut F,
-        ) where
-            F: FnMut(&[(usize, usize)]),
-        {
-            if index == size_counts.len() {
-                function(chosen_so_far);
-                return;
-            }
-            let (value, count) = size_counts[index];
-            let base_len = chosen_so_far.len();
-            for k in 0..=count {
-                chosen_so_far.truncate(base_len);
-                chosen_so_far.extend(std::iter::repeat_n((value, k), k));
-                enumerate_unique_subsets(size_counts, index + 1, chosen_so_far, function);
-            }
-        }
-
         let mut subset_buffer: Vec<(usize, usize)> = Vec::with_capacity(container_sizes.len());
         let mut found = false;
-        enumerate_unique_subsets(container_sizes, 0, &mut subset_buffer, &mut |subset: &[(usize, usize)]| {
-            if found {return;}
+        Self::enumerate_unique_subsets(container_sizes, 0, &mut subset_buffer, &mut |subset: &[(usize, usize)]| {
             let subset_sum: usize = subset.iter().map(|(v, c)| v * c).sum();
-            if subset_sum != first_liquid {return;}
+            if subset_sum != first_liquid {return false;}
 
             let mut remaining_containers: Vec<(usize, usize)> = container_sizes.to_vec();
             for (value, count) in remaining_containers.iter_mut() {
@@ -578,10 +617,12 @@ impl GameState {
                     }
                 }
             }
-
+            remaining_containers.retain(|&(_, c)| c > 0);
             if self.recursive_is_solvable(&remaining_containers, remaining_liquids) {
                 found = true;
+                return true;
             }
+            false
         });
 
         if found {

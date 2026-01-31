@@ -23,7 +23,7 @@ async fn main() {
             engine.handle_click(x, y, true);
         }
         if is_key_pressed(KeyCode::S) {
-            if engine.get_state().is_solvable() {
+            if engine.get_state().simple_is_solvable() {
                 println!("The current state is solvable.");
             } else {
                 println!("The current state is not solvable.");
