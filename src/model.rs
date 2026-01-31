@@ -577,27 +577,32 @@ impl GameState {
         None
     }
 
-    fn enumerate_unique_subsets<F>(
+    fn enumerate_subsets_to_target_size(
         size_counts: &[(usize, usize)],
-        index: usize,
         chosen_so_far: &mut Vec<(usize, usize)>,
-        function: &mut F,
-    ) -> bool
-    // returns true to stop enumeration early
-    where
-        F: FnMut(&[(usize, usize)]) -> bool,
-    {
-        if index == size_counts.len() {
-            return function(chosen_so_far);
+        index: usize,
+        target_sizes: &std::collections::HashSet<usize>,
+        max_size: usize,
+        sum_so_far: usize,
+        hashmap_to_add_to: &mut std::collections::HashMap<usize, Vec<Vec<(usize, usize)>>>,
+    ) {
+        if index >= size_counts.len() {
+            if target_sizes.contains(&sum_so_far) {
+                hashmap_to_add_to.entry(sum_so_far).or_insert_with(Vec::new).push(chosen_so_far.clone());
+            }
+            return;
         }
         let (value, count) = size_counts[index];
         let base_len = chosen_so_far.len();
         for k in 0..=count {
+            let new_sum = sum_so_far + value * k;
+            if new_sum > max_size {
+                return;
+            }
             chosen_so_far.truncate(base_len);
             chosen_so_far.push((value, k));
-            Self::enumerate_unique_subsets(size_counts, index + 1, chosen_so_far, function);
+            Self::enumerate_subsets_to_target_size(size_counts, chosen_so_far, index + 1, target_sizes, max_size, new_sum, hashmap_to_add_to);
         }
-        false
     }
 
     pub fn is_solvable(&self) -> bool {
@@ -626,12 +631,20 @@ impl GameState {
             .map(|(_, count)| *count)
             .collect();
         // liquids.sort();
-        debug!("Checking full solvability with containers: {:?}, liquids: {:?}", containers, liquids);
+        let mut ways_to_get_liquids: std::collections::HashMap<usize,Vec<Vec<(usize, usize)>>> = std::collections::HashMap::with_capacity(liquids.len());
+        for &liquid in liquids.iter() {
+            ways_to_get_liquids.insert(liquid, Vec::new());
+        }
+        debug!("Preprocessing for solvability containers: {:?}, liquids: {:?}", containers, liquids);
+        Self::enumerate_subsets_to_target_size(&container_sizes, &mut Vec::new(), 0, &ways_to_get_liquids.keys().copied().collect(), *containers.iter().max().unwrap_or(&0), 0, &mut ways_to_get_liquids);
+        debug!("Solving");
         self.recursive_is_solvable(&container_sizes, &liquids)
     }
 
-    fn recursive_is_solvable(&self, container_sizes: &[(usize,usize)], liquids: &[usize]) -> bool {
+    fn recursive_is_solvable(&self, , liquids: &[usize]) -> bool {
 
+
+        //  Next step: See if there's some dynamic programming way to more efficiently find all combinations of container sizes that sum to a precise target liquid size.
         if liquids.is_empty() {
             debug!("All liquids have been successfully matched.");
             return true;
