@@ -156,6 +156,9 @@ impl FluidContainer {
         let use_commas = repr.contains(',');
         if use_commas {
             for token in repr.split(',') {
+                if token.is_empty() {
+                    continue;
+                }
                 let packet = FluidPacket::new_from_repr(token);
                 packets.push(packet);
             }
@@ -365,6 +368,9 @@ impl GameState {
 
         for line in repr.lines() {
             let container = FluidContainer::new_from_repr(line);
+            if container.get_capacity() == 0 {
+                continue;
+            }
             fluid_containers.push(container);
         }
         Self { fluid_containers }
