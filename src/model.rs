@@ -507,33 +507,10 @@ impl GameState {
         containers
     }
 
-    fn enumerate_unique_subsets<F>(
-            size_counts: &[(usize, usize)],
-            index: usize,
-            chosen_so_far: &mut Vec<(usize, usize)>,
-            function: &mut F,
-        ) -> bool
-        // returns true to stop enumeration early
-        where
-            F: FnMut(&[(usize, usize)]) -> bool,
-        {
-            if index == size_counts.len() {
-                return function(chosen_so_far);
-            }
-            let (value, count) = size_counts[index];
-            let base_len = chosen_so_far.len();
-            for k in 0..=count {
-                chosen_so_far.truncate(base_len);
-                chosen_so_far.push((value, k));
-                Self::enumerate_unique_subsets(size_counts, index + 1, chosen_so_far, function);
-            }
-            false
-        }
-
-    fn super_simple_is_solvable(&self) -> bool {
+    pub fn fast_is_definitely_solvable(&self) -> bool {
         // Checks if every liquid can perfectly fit into containers of the same size.
+        // If this returns true, the puzzle is definitely solvable. If false, may still be solvable.
         // Guaranteed correct if no liquid ends up split across multiple containers.
-        // Sufficient but not necessary for general cases.
         let mut container_size_map: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
         for container in &self.fluid_containers {
             *container_size_map.entry(container.get_capacity()).or_insert(0) += 1;
@@ -551,63 +528,75 @@ impl GameState {
         true
     }
 
-    pub fn simple_is_solvable(&self) -> bool {
+    pub fn fast_is_definitely_unsolvable(&self) -> bool {
+        // Checks if any liquid cannot possibly fit into any combination of available containers.
         // Does not consider that once a container is used for one color, it can't be used for another.
-        // Way faster, guaranteed correct if all containers are the same size.
-        // Required but not sufficient for general cases.
-        if self.super_simple_is_solvable() {
-            debug!("Super simple solvability check passed.");
-            return true;
-        }
+        // If this returns true, the puzzle is definitely unsolvable. If false, may still be unsolvable.
+        // Guaranteed correct if all containers are the same size.
         let containers: Vec<usize> = self
             .fluid_containers
             .iter()
             .map(|c| c.get_capacity())
             .collect();
-        let mut size_map: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        let mut reachable_sizes: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        reachable_sizes.insert(0);
         for &c in containers.iter() {
-            *size_map.entry(c).or_insert(0) += 1;
+            let current_sizes: Vec<usize> = reachable_sizes.iter().copied().collect();
+            for &r in current_sizes.iter() {
+                reachable_sizes.insert(r + c);
+            }
         }
-        let container_sizes: Vec<(usize, usize)> = size_map.into_iter().collect();
         let liquids: Vec<usize> = self
             .get_available_colors_with_count()
             .iter()
             .map(|(_, count)| *count)
             .collect();
-        debug!("Checking simple solvability with containers: {:?}, liquids: {:?}", container_sizes, liquids);
-        let mut found = false;
         for liquid_count in liquids.iter() {
-            debug!("Checking for liquid count: {}", liquid_count);
-            let mut subset_buffer: Vec<(usize, usize)> = Vec::with_capacity(container_sizes.len());
-            Self::enumerate_unique_subsets(&container_sizes, 0, &mut subset_buffer, &mut |subset| {
-                // Check if the current subset can accommodate the liquids
-                let subset_sum: usize = subset.iter().map(|(v, c)| v * c).sum();
-                if subset_sum == *liquid_count {
-                    found = true;
-                    return true;
-                }
-                false
-            });
-            if !found {return false;}
-            found = false;
+            if !reachable_sizes.contains(liquid_count) {
+                return true;
+            }
         }
-        true
+        false
+    }
+
+    fn enumerate_unique_subsets<F>(
+        size_counts: &[(usize, usize)],
+        index: usize,
+        chosen_so_far: &mut Vec<(usize, usize)>,
+        function: &mut F,
+    ) -> bool
+    // returns true to stop enumeration early
+    where
+        F: FnMut(&[(usize, usize)]) -> bool,
+    {
+        if index == size_counts.len() {
+            return function(chosen_so_far);
+        }
+        let (value, count) = size_counts[index];
+        let base_len = chosen_so_far.len();
+        for k in 0..=count {
+            chosen_so_far.truncate(base_len);
+            chosen_so_far.push((value, k));
+            Self::enumerate_unique_subsets(size_counts, index + 1, chosen_so_far, function);
+        }
+        false
     }
 
     pub fn is_solvable(&self) -> bool {
-        if !self.simple_is_solvable() {
-            debug!("Simple solvability check failed.");
+        if self.fast_is_definitely_solvable() {
+            debug!("Fast definite solvability check passed.");
+            return true;
+        }
+        if self.fast_is_definitely_unsolvable() {
+            debug!("Fast definite unsolvability check failed.");
             return false;
         }
         let unique_sizes: std::collections::HashSet<usize> = self.get_container_sizes().iter().copied().collect();
         if unique_sizes.len() == 1 {
-            debug!("All containers are the same size therefore simple solve is accurate.");
+            debug!("All containers are the same size therefore fast unsolvability checker is accurate.");
             return true;
         }
-        if self.super_simple_is_solvable() {
-            debug!("Super simple solvability check passed.");
-            return true;
-        }
+        debug!("Proceeding to full solvability check.");
         
         let containers: Vec<usize> = self
             .fluid_containers
