@@ -530,10 +530,35 @@ impl GameState {
             false
         }
 
+    fn super_simple_is_solvable(&self) -> bool {
+        // Checks if every liquid can perfectly fit into containers of the same size.
+        // Guaranteed correct if no liquid ends up split across multiple containers.
+        // Sufficient but not necessary for general cases.
+        let mut container_size_map: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for container in &self.fluid_containers {
+            *container_size_map.entry(container.get_capacity()).or_insert(0) += 1;
+        }
+        let mut liquid_size_map: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for (_, count) in self.get_available_colors_with_count() {
+            *liquid_size_map.entry(count).or_insert(0) += 1;
+        }
+        for (liquid_size, liquid_count) in liquid_size_map.iter() {
+            let container_count = container_size_map.get(liquid_size).unwrap_or(&0);
+            if liquid_count > container_count {
+                return false;
+            }
+        }
+        true
+    }
+
     pub fn simple_is_solvable(&self) -> bool {
         // Does not consider that once a container is used for one color, it can't be used for another.
         // Way faster, guaranteed correct if all containers are the same size.
         // Required but not sufficient for general cases.
+        if self.super_simple_is_solvable() {
+            debug!("Super simple solvability check passed.");
+            return true;
+        }
         let containers: Vec<usize> = self
             .fluid_containers
             .iter()
@@ -549,7 +574,7 @@ impl GameState {
             .iter()
             .map(|(_, count)| *count)
             .collect();
-        debug!("Checking solvability with containers: {:?}, liquids: {:?}", container_sizes, liquids);
+        debug!("Checking simple solvability with containers: {:?}, liquids: {:?}", container_sizes, liquids);
         let mut found = false;
         for liquid_count in liquids.iter() {
             debug!("Checking for liquid count: {}", liquid_count);
@@ -574,6 +599,16 @@ impl GameState {
             debug!("Simple solvability check failed.");
             return false;
         }
+        let unique_sizes: std::collections::HashSet<usize> = self.get_container_sizes().iter().copied().collect();
+        if unique_sizes.len() == 1 {
+            debug!("All containers are the same size therefore simple solve is accurate.");
+            return true;
+        }
+        if self.super_simple_is_solvable() {
+            debug!("Super simple solvability check passed.");
+            return true;
+        }
+        
         let containers: Vec<usize> = self
             .fluid_containers
             .iter()
@@ -589,7 +624,7 @@ impl GameState {
             .iter()
             .map(|(_, count)| *count)
             .collect();
-        debug!("Checking solvability with containers: {:?}, liquids: {:?}", containers, liquids);
+        debug!("Checking full solvability with containers: {:?}, liquids: {:?}", containers, liquids);
         self.recursive_is_solvable(&container_sizes, &liquids)
     }
 
