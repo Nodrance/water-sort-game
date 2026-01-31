@@ -191,6 +191,9 @@ impl Renderer {
         rect: Rect,
         color: Color,
     ) {
+        if rect.w <= 5.0 || rect.h <= 5.0 {
+            return;
+        }
         let (optimal_size, x, y) = self
             .cached_text_sizer
             .get_text_max_size(text, rect.w, rect.h);
@@ -263,6 +266,9 @@ impl Renderer {
                 );
             }
             if i < container.get_capacity() - 1 {
+                if packet_height <= 2.0 && i % (container.get_capacity() / 10) != 0 {
+                    continue;
+                }
                 let left_edge = rect.x + (rect.w * CONTAINER_LINE_PADDING);
                 let right_edge = rect.x + rect.w - (rect.w * CONTAINER_LINE_PADDING);
                 draw_line(left_edge, packet_y, right_edge, packet_y, 2.0, DARKGRAY);
