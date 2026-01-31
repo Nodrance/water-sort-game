@@ -513,43 +513,42 @@ impl GameState {
             .iter()
             .map(|c| c.get_capacity())
             .collect();
+        let mut size_map: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for &c in containers.iter() {
+            *size_map.entry(c).or_insert(0) += 1;
+        }
+        let container_sizes: Vec<(usize, usize)> = size_map.into_iter().collect();
         let liquids: Vec<usize> = self
             .get_available_colors_with_count()
             .iter()
             .map(|(_, count)| *count)
             .collect();
         debug!("Checking solvability with containers: {:?}, liquids: {:?}", containers, liquids);
-        self.recursive_is_solvable(&containers, &liquids)
+        self.recursive_is_solvable(&container_sizes, &liquids)
     }
 
-    fn recursive_is_solvable(&self, containers: &[usize], liquids: &[usize]) -> bool {
+    fn recursive_is_solvable(&self, container_sizes: &[(usize,usize)], liquids: &[usize]) -> bool {
         // A solve only counts if every container is either fully filled with no air, or fully empty,
         // every liquid is fully stored, and different liquids never share a container (no mixing).
 
-        debug!("Recursive check: containers: {:?}, liquids: {:?}", containers, liquids);
         let total_liquid: usize = liquids.iter().sum();
-        let total_capacity: usize = containers.iter().sum();
-        if total_liquid > total_capacity {
-            return false;
-        }
         if total_liquid == 0 {
             return true;
         }
+        let total_capacity: usize = container_sizes.iter().map(|(v, c)| v * c).sum();
+        if total_liquid > total_capacity {
+            return false;
+        }
         let first_liquid = liquids[0];
         let remaining_liquids = &liquids[1..];
-        let mut size_map: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
-        for &c in containers.iter() {
-            *size_map.entry(c).or_insert(0) += 1;
-        }
-        let container_sizes: Vec<(usize, usize)> = size_map.into_iter().collect();
 
         fn enumerate_unique_subsets<F>(
             size_counts: &[(usize, usize)],
             index: usize,
-            chosen_so_far: &mut Vec<usize>,
+            chosen_so_far: &mut Vec<(usize, usize)>,
             function: &mut F,
         ) where
-            F: FnMut(&[usize]),
+            F: FnMut(&[(usize, usize)]),
         {
             if index == size_counts.len() {
                 function(chosen_so_far);
@@ -559,29 +558,24 @@ impl GameState {
             let base_len = chosen_so_far.len();
             for k in 0..=count {
                 chosen_so_far.truncate(base_len);
-                chosen_so_far.extend(std::iter::repeat_n(value, k));
+                chosen_so_far.extend(std::iter::repeat_n((value, k), k));
                 enumerate_unique_subsets(size_counts, index + 1, chosen_so_far, function);
             }
         }
 
-        let mut subset_buf: Vec<usize> = Vec::with_capacity(containers.len());
+        let mut subset_buffer: Vec<(usize, usize)> = Vec::with_capacity(container_sizes.len());
         let mut found = false;
-        enumerate_unique_subsets(&container_sizes, 0, &mut subset_buf, &mut |subset: &[usize]| {
+        enumerate_unique_subsets(container_sizes, 0, &mut subset_buffer, &mut |subset: &[(usize, usize)]| {
             if found {return;}
-            let subset_sum: usize = subset.iter().sum();
+            let subset_sum: usize = subset.iter().map(|(v, c)| v * c).sum();
             if subset_sum != first_liquid {return;}
 
-            let mut remaining_containers: Vec<usize> = Vec::with_capacity(containers.len().saturating_sub(subset.len()));
-            let mut si = 0usize;
-            for &(value, count) in &container_sizes {
-                let mut chosen_k = 0usize;
-                while si < subset.len() && subset[si] == value {
-                    chosen_k += 1;
-                    si += 1;
-                }
-                let left = count.saturating_sub(chosen_k);
-                if left > 0 {
-                    remaining_containers.extend(std::iter::repeat_n(value, left));
+            let mut remaining_containers: Vec<(usize, usize)> = container_sizes.to_vec();
+            for (value, count) in remaining_containers.iter_mut() {
+                for &(sub_value, sub_count) in subset.iter() {
+                    if *value == sub_value {
+                        *count = count.saturating_sub(sub_count);
+                    }
                 }
             }
 
