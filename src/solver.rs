@@ -171,10 +171,10 @@ impl GameState {    fn fast_is_definitely_solvable(&self) -> bool {
         // If this returns true, there is definitely a way to arrange the liquids that is solved, although it might not be reachable entirely by moves.
         // If false, there is definitely no way to arrange the liquids that is solved.
         // This is a computationally expensive check, so we first run the fast checks.
-        // if let Some(result) = self.fast_is_maybe_solvable() {
-        //     return result;
-        // }
-        debug!("Proceeding to full solvability check.");
+        if let Some(result) = self.fast_is_maybe_solvable() {
+            return result;
+        }
+        debug!("Fast checks inconclusive, proceeding to full solvability check.");
         
         let containers_vec: Vec<usize> = self
             .fluid_containers
@@ -201,10 +201,8 @@ impl GameState {    fn fast_is_definitely_solvable(&self) -> bool {
         for &liquid in liquid_sizes_set.iter() {
             ways_to_get_liquids.insert(liquid, Vec::new());
         }
-        debug!("Enumerating subsets to target sizes: {:?}", liquid_sizes_set);
-        debug!("Container sizes and counts: {:?}", container_size_and_count_vec);
         let total_iterations = container_size_and_count_vec.iter().map(|(_, count)| *count + 1).product::<usize>();
-        debug!("Total subset combinations to consider: {}", total_iterations);
+        debug!("Preprocessing subsets, total subset combinations to consider: {}", total_iterations);
         Self::enumerate_subsets_to_target_size(
             &container_size_and_count_vec,
             &mut HashMap::with_capacity(container_size_to_count_map.len()), 
@@ -218,7 +216,9 @@ impl GameState {    fn fast_is_definitely_solvable(&self) -> bool {
         // Simplify by applying forced choices
         loop {
             if ways_to_get_liquids.values().any(|v| v.is_empty()) {
-                debug!("No ways to get some liquids, unsolvable.");
+                if let Some(unsolvable_liquid) = ways_to_get_liquids.iter().find(|(_, v)| v.is_empty()).map(|(k, _)| *k) {
+                    debug!("No ways to make a liquid of size {} after pruning, unsolvable.", unsolvable_liquid);
+                }
                 return false;
             }
             let single_option = ways_to_get_liquids.iter().find(|(_, v)| v.len() == 1);
@@ -255,10 +255,7 @@ impl GameState {    fn fast_is_definitely_solvable(&self) -> bool {
             ways_to_get_liquids.remove(&liquid_size);
             liquid_size_vec.retain(|&s| s != liquid_size);
         }
-        debug!("Solving");
-        let mut lengths = ways_to_get_liquids.iter().map(|(k,v)| (*k, v.len())).collect::<Vec<(usize, usize)>>();
-        lengths.sort_by(|a, b| a.1.cmp(&b.1));
-        debug!("Ways to get liquids sizes: {:?}", lengths);
+        debug!("Recursive solving");
 
         let found = Arc::new(AtomicBool::new(false));
         Self::recursive_is_solvable(
