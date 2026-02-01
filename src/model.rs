@@ -333,7 +333,12 @@ impl FluidContainer {
         }
         let has_multi_char = repr.iter().any(|s| s.len() > 1);
         let separator = if has_multi_char { "," } else { "" };
-        repr.join(separator)
+        let mut result = repr.join(separator);
+        if has_multi_char && repr.len() == 1 {
+            // Ensures that a value like "AB" is interpreted as [AB] and not [A, B].
+            result = format!("{},", result);
+        }
+        result
     }
 }
 
