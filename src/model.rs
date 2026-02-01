@@ -230,6 +230,10 @@ impl FluidContainer {
         self.packets.iter().all(|p| p.is_empty())
     }
 
+    pub fn is_solved(&self) -> bool {
+        self.is_empty() || self.get_top_fluid_depth() == self.get_capacity()
+    }
+
     pub fn get_empty_space(&self) -> usize {
         self.packets.iter().filter(|p| p.is_empty()).count()
     }
@@ -240,6 +244,31 @@ impl FluidContainer {
 
     pub fn get_filled_amount(&self) -> usize {
         self.get_capacity() - self.get_empty_space()
+    }
+
+    pub fn get_entropy(&self) -> usize {
+        // Entropy in the entire system always strictly decreases with valid moves, unless pouring between two containers of the same color.
+        // Entropy is the number of color transitions in the container, plus one for each contiguous block of color.
+        // It's defined this way to handle edge cases with moving into empty containers.
+        let mut entropy = 0;
+        let mut prev_color_id: Option<usize> = None;
+        for packet in &self.packets {
+            match packet {
+                FluidPacket::Fluid { color_id } => {
+                    if Some(*color_id) != prev_color_id {
+                        entropy += 1;
+                        if prev_color_id.is_some() {
+                            entropy += 1;
+                        }
+                        prev_color_id = Some(*color_id);
+                    }
+                }
+                FluidPacket::Empty => {
+                    prev_color_id = None;
+                }
+            }
+        }
+        entropy
     }
 
     pub fn get_top_fluid(&self) -> FluidPacket {
@@ -426,6 +455,10 @@ impl GameState {
         self.fluid_containers.iter().map(|c| c.get_empty_space()).sum()
     }
 
+    pub fn get_entropy(&self) -> usize {
+        self.fluid_containers.iter().map(|c| c.get_entropy()).sum()
+    }
+
     pub fn get_top_colors(&self) -> Vec<usize> {
         let mut colors = vec![];
         for container in &self.fluid_containers {
@@ -446,56 +479,6 @@ impl GameState {
         sizes
     }
 
-    pub fn get_possible_moves(&self) -> Vec<MoveAction> {
-        let mut moves = vec![];
-        for color in self.get_top_colors() {
-            for (from_index, from_container) in self.fluid_containers.iter().enumerate() {
-                if from_container.is_empty() || from_container.get_top_fluid() != FluidPacket::new(color) {
-                    continue;
-                }
-                for (to_index, to_container) in self.fluid_containers.iter().enumerate() {
-                    if from_index == to_index {
-                        continue;
-                    }
-                    let amount = from_container.get_pourable_amount(to_container);
-                    if amount > 0 {
-                        moves.push(MoveAction {
-                            from_container: from_index,
-                            to_container: to_index,
-                            amount,
-                        });
-                    }
-                }
-            }
-        }
-        moves
-    }
-
-    pub fn get_possible_reverse_moves(&self) -> Vec<MoveAction> {
-        let mut moves = vec![];
-        for color in self.get_top_colors() {
-            for (from_index, from_container) in self.fluid_containers.iter().enumerate() {
-                if from_container.is_empty() || from_container.get_top_fluid() != FluidPacket::new(color) {
-                    continue;
-                }
-                for (to_index, to_container) in self.fluid_containers.iter().enumerate() {
-                    if from_index == to_index {
-                        continue;
-                    }
-                    let amount = from_container.get_reverse_pourable_amount(to_container);
-                    if amount > 0 {
-                        moves.push(MoveAction {
-                            from_container: from_index,
-                            to_container: to_index,
-                            amount,
-                        });
-                    }
-                }
-            }
-        }
-        moves
-    }
-
     pub fn apply_move(&mut self, action: &MoveAction) {
         let from = action.from_container;
         let to = action.to_container;
@@ -512,6 +495,7 @@ impl GameState {
         let from = action.from_container;
         let to = action.to_container;
         let amount = action.amount;
+        debug!("Applying reverse move: from {} to {} amount {}", from, to, amount);
         if from < to {
             let (left, right) = self.fluid_containers.split_at_mut(to);
             left[from].reverse_pour_into(&mut right[0], amount);
@@ -525,6 +509,10 @@ impl GameState {
         let mut containers = self.fluid_containers.clone();
         containers.sort();
         containers
+    }
+
+    pub fn is_solved(&self) -> bool {
+        self.fluid_containers.iter().all(|c| c.is_solved())
     }
 }
 
@@ -558,6 +546,7 @@ pub enum ControlAction {
     RemoveContainer,
     ExpandContainer,
     ShrinkContainer,
+    ShuffleState,
 }
 
 #[derive(Clone, Debug, PartialEq)]

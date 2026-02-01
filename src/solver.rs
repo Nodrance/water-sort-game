@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use rayon::prelude::*;
 use macroquad::prelude::debug;
+use rand::prelude::*;
 
 use std::sync::{
     Arc,
@@ -64,7 +65,8 @@ impl Solver {
     }
 }
 
-impl GameState {    fn fast_is_definitely_solvable(&self) -> bool {
+impl GameState {
+    fn fast_is_definitely_solvable(&self) -> bool {
         // Checks if every liquid can perfectly fit into containers of the same size.
         // If this returns true, the puzzle is definitely solvable. If false, may still be solvable.
         // Guaranteed correct if no liquid ends up split across multiple containers.
@@ -122,6 +124,10 @@ impl GameState {    fn fast_is_definitely_solvable(&self) -> bool {
 
     pub fn fast_is_maybe_solvable(&self) -> Option<bool> {
         // Returns Some(true) if definitely solvable, Some(false) if definitely unsolvable, None if unknown
+        if self.is_solved() {
+            debug!("Game state is already solved.");
+            return Some(true);
+        }
         if self.fast_is_definitely_unsolvable() {
             debug!("Fast definite unsolvability check failed.");
             return Some(false);
@@ -213,7 +219,7 @@ impl GameState {    fn fast_is_definitely_solvable(&self) -> bool {
             &mut ways_to_get_liquids,
         );
 
-        // Simplify by applying forced choices
+        debug!("Pruning forced options");
         loop {
             if ways_to_get_liquids.values().any(|v| v.is_empty()) {
                 if let Some(unsolvable_liquid) = ways_to_get_liquids.iter().find(|(_, v)| v.is_empty()).map(|(k, _)| *k) {
@@ -314,5 +320,123 @@ impl GameState {    fn fast_is_definitely_solvable(&self) -> bool {
                 found,
             )
         })
+    }
+
+    pub fn get_possible_moves(&self) -> Vec<MoveAction> {
+        let mut moves = vec![];
+        for color in self.get_top_colors() {
+            for (from_index, from_container) in self.fluid_containers.iter().enumerate() {
+                if from_container.is_empty() || from_container.get_top_fluid() != FluidPacket::new(color) {
+                    continue;
+                }
+                for (to_index, to_container) in self.fluid_containers.iter().enumerate() {
+                    if from_index == to_index {
+                        continue;
+                    }
+                    let amount = from_container.get_pourable_amount(to_container);
+                    if amount == from_container.get_top_fluid_depth() {
+                        // If the amount is less, then this move is reversible, so we only consider full pours to reduce the search space
+                        moves.push(MoveAction {
+                            from_container: from_index,
+                            to_container: to_index,
+                            amount,
+                        });
+                    }
+                }
+            }
+        }
+        moves
+    }
+
+    pub fn get_possible_reverse_moves(&self, limit_size: bool) -> Vec<MoveAction> {
+        let mut moves = vec![];
+        for (from_index, from_container) in self.fluid_containers.iter().enumerate() {
+            if from_container.is_empty() {
+                continue;
+            }
+            for (to_index, to_container) in self.fluid_containers.iter().enumerate() {
+                if from_container == to_container || from_container.get_top_fluid() == to_container.get_top_fluid() {
+                    // If the top fluids are the same, then the move is reversible, so we skip it to reduce the search space
+                    continue;
+                }
+                let mut amount = from_container.get_reverse_pourable_amount(to_container);
+                if limit_size && from_container.get_filled_amount() == amount {
+                    amount -= 1;
+                }
+                if amount > 0 {
+                    moves.push(MoveAction {
+                        from_container: from_index,
+                        to_container: to_index,
+                        amount,
+                    });
+                }
+            }
+        }
+        moves
+    }
+
+    pub fn apply_random_move(&mut self) -> bool {
+        let possible_moves = self.get_possible_moves();
+        if possible_moves.is_empty() {
+            return false;
+        }
+        let mut rng = rand::rng();
+        let selected_move = &possible_moves.choose(&mut rng).unwrap();
+        self.apply_move(selected_move);
+        true
+    }
+    pub fn apply_random_reverse_move(&mut self) -> bool {
+        let possible_moves = self.get_possible_reverse_moves(true);
+        if possible_moves.is_empty() {
+            return false;
+        }
+        let mut rng = rand::rng();
+        let selected_move = &possible_moves.choose(&mut rng).unwrap();
+        self.apply_reverse_move(selected_move);
+        true
+    }
+
+    pub fn shuffle(&mut self) {
+        let mut rng = rand::rng();
+        for _ in 0..1000 {
+            let mut reverse_moves = self.get_possible_reverse_moves(true);
+            let smallest_block_depth = self.fluid_containers
+                .iter()
+                .map(|container| container.get_top_fluid_depth())
+                .min();
+            let smallest_block_container_indices: Option<Vec<usize>> = smallest_block_depth.map(|min_depth| {
+                self.fluid_containers
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, container)| container.get_top_fluid_depth() == min_depth)
+                    .map(|(index, _)| index)
+                    .collect()
+            });
+            if let Some(smallest_indices) = smallest_block_container_indices {
+                reverse_moves.retain(|m| smallest_indices.contains(&m.to_container));
+            }
+            let largest_block_depth = self.fluid_containers
+                .iter()
+                .map(|container| container.get_top_fluid_depth())
+                .max();
+            let largest_block_container_indices: Option<Vec<usize>> = largest_block_depth.map(|max_depth| {
+                self.fluid_containers
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, container)| container.get_top_fluid_depth() == max_depth)
+                    .map(|(index, _)| index)
+                    .collect()
+            });
+            if let Some(largest_indices) = largest_block_container_indices {
+                reverse_moves.retain(|m| largest_indices.contains(&m.from_container));
+            }
+
+            let selected_move = reverse_moves.choose(&mut rng);
+            if let Some(mv) = selected_move {
+                self.apply_reverse_move(mv);
+            } else {
+                break;
+            }
+        }
     }
 }

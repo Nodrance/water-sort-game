@@ -275,6 +275,9 @@ impl Renderer {
             }
         }
         draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 3.0, DARKGRAY);
+        // DEBUG draw entropy near the top
+        let entropy = container.get_entropy();
+        draw_text(&format!("Entropy: {}", entropy), rect.x + 5.0, rect.y + 5.0, 16.0, WHITE);
         if selected {
             draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, SELECTION_BORDER, WHITE);
         }

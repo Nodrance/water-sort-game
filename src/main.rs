@@ -28,6 +28,15 @@ async fn main() {
             } else {
                 println!("The current state is not solvable.");
             }
+            // if let Some(result) = engine.get_state().fast_is_maybe_solvable() {
+            //     if result {
+            //         println!("The current state is definitely solvable.");
+            //     } else {
+            //         println!("The current state is definitely not solvable.");
+            //     }
+            // } else {
+            //     println!("The current state solvability is inconclusive from fast checks.");
+            // }
         }
         next_frame().await;
     }

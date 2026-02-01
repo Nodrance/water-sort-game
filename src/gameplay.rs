@@ -40,6 +40,7 @@ impl GameEngine {
             Button::new("Remove", ControlAction::RemoveContainer, FLUID_COLORS[0]), // RED
             Button::new("Expand", ControlAction::ExpandContainer, FLUID_COLORS[1]), // BLUE
             Button::new("Shrink", ControlAction::ShrinkContainer, FLUID_COLORS[2]), // YELLOW
+            Button::new("Shuffle", ControlAction::ShuffleState, FLUID_COLORS[10]), // BROWN
 
             Button::new("Paste", ControlAction::PasteState, FLUID_COLORS[4]), // PURPLE
             Button::new("Copy", ControlAction::CopyState, FLUID_COLORS[5]), // ORANGE
@@ -164,7 +165,8 @@ impl GameEngine {
             ControlAction::RemoveContainer|
             ControlAction::ExpandContainer|
             ControlAction::ShrinkContainer|
-            ControlAction::ReversePour(_, _, _)
+            ControlAction::ReversePour(_, _, _)|
+            ControlAction::ShuffleState
         ) && !self.is_editor_mode() {
             return;
         }
@@ -257,6 +259,10 @@ impl GameEngine {
                     to_container: to,
                     amount,
                 });
+            }
+            ControlAction::ShuffleState => {
+                self.push_undo_state();
+                self.state.shuffle();
             }
         }
         self.render();
