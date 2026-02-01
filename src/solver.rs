@@ -5,6 +5,11 @@ use std::collections::HashSet;
 use rayon::prelude::*;
 use macroquad::prelude::debug;
 
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
 #[derive(Clone)]
 struct GameStateWithHistory {
     state: GameState,
@@ -254,10 +259,13 @@ impl GameState {    fn fast_is_definitely_solvable(&self) -> bool {
         let mut lengths = ways_to_get_liquids.iter().map(|(k,v)| (*k, v.len())).collect::<Vec<(usize, usize)>>();
         lengths.sort_by(|a, b| a.1.cmp(&b.1));
         debug!("Ways to get liquids sizes: {:?}", lengths);
+
+        let found = Arc::new(AtomicBool::new(false));
         Self::recursive_is_solvable(
             &ways_to_get_liquids,
             container_size_to_count_map,
             &liquid_size_vec,
+            &found,
         )
     }
 
@@ -265,9 +273,16 @@ impl GameState {    fn fast_is_definitely_solvable(&self) -> bool {
         ways_to_get_liquids: &HashMap<usize, Vec<HashMap<usize, usize>>>,
         remaining_container_sizes: HashMap<usize, usize>,
         liquid_sizes: &[usize],
+        found: &Arc<AtomicBool>,
     ) -> bool {
+        // If another branch already proved solvable, stop ASAP.
+        if found.load(Ordering::Relaxed) {
+            return true;
+        }
+
         if liquid_sizes.is_empty() {
             debug!("All liquids have been successfully matched.");
+            found.store(true, Ordering::Relaxed);
             return true;
         }
 
@@ -276,12 +291,18 @@ impl GameState {    fn fast_is_definitely_solvable(&self) -> bool {
             return false;
         };
 
-        // Explore each possible container-subset choice in parallel.
-        // `any()` short-circuits: as soon as one branch returns true, the whole call returns true.
         ways.par_iter().any(|way| {
+            if found.load(Ordering::Relaxed) {
+                return true;
+            }
+
             let mut new_remaining_container_sizes = remaining_container_sizes.clone();
 
             for (size, count) in way.iter() {
+                if found.load(Ordering::Relaxed) {
+                    return true;
+                }
+
                 let entry = new_remaining_container_sizes.entry(*size).or_insert(0);
                 if *entry < *count {
                     return false;
@@ -289,7 +310,12 @@ impl GameState {    fn fast_is_definitely_solvable(&self) -> bool {
                 *entry -= *count;
             }
 
-            Self::recursive_is_solvable(ways_to_get_liquids, new_remaining_container_sizes, &liquid_sizes[1..])
+            Self::recursive_is_solvable(
+                ways_to_get_liquids,
+                new_remaining_container_sizes,
+                &liquid_sizes[1..],
+                found,
+            )
         })
     }
 }
