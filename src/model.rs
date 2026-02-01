@@ -3,6 +3,9 @@ use std::collections::HashSet;
 
 use macroquad::{prelude::*};
 
+// Parallel recursion
+use rayon::prelude::*;
+
 // FluidPacket
 
 pub const FLUID_COLORS: [Color; 32] = [
@@ -168,6 +171,9 @@ impl FluidContainer {
                 packets.push(packet);
             }
         }
+        let non_empty_packets: Vec<FluidPacket> = packets.iter().cloned().filter(|p| !p.is_empty()).collect();
+        let empty_count = packets.len() - non_empty_packets.len();
+        let packets: Vec<FluidPacket> = non_empty_packets.into_iter().chain(vec![FluidPacket::Empty; empty_count]).collect();
         let capacity = packets.len();
         Self { packets, capacity }
     }
@@ -595,7 +601,7 @@ impl GameState {
     }
 
     fn enumerate_subsets_to_target_size(
-        size_vec: &Vec<(usize, usize)>,
+        container_size_and_count_vec: &Vec<(usize, usize)>,
         chosen_so_far: &mut HashMap<usize, usize>,
         index: usize,
         target_sizes: &HashSet<usize>,
@@ -603,8 +609,8 @@ impl GameState {
         sum_so_far: usize,
         hashmap_to_add_to: &mut HashMap<usize, Vec<HashMap<usize, usize>>>,
     ) {
-        let (value, count) = size_vec[index];
-        let map_length = size_vec.len();
+        let (value, count) = container_size_and_count_vec[index];
+        let map_length = container_size_and_count_vec.len();
         for k in 0..=count {
             let new_sum = sum_so_far + value * k;
             if new_sum > max_size {
@@ -618,7 +624,7 @@ impl GameState {
                 continue;
             }
             chosen_so_far.insert(value, k);
-            Self::enumerate_subsets_to_target_size(size_vec, chosen_so_far, index + 1, target_sizes, max_size, new_sum, hashmap_to_add_to);
+            Self::enumerate_subsets_to_target_size(container_size_and_count_vec, chosen_so_far, index + 1, target_sizes, max_size, new_sum, hashmap_to_add_to);
         }
     }
 
@@ -632,74 +638,114 @@ impl GameState {
         }
         debug!("Proceeding to full solvability check.");
         
-        let containers: Vec<usize> = self
+        let containers_vec: Vec<usize> = self
             .fluid_containers
             .iter()
             .map(|c| c.get_capacity())
             .collect();
-        let mut size_map: HashMap<usize, usize> = HashMap::new();
-        for &c in containers.iter() {
-            *size_map.entry(c).or_insert(0) += 1;
+        let mut container_size_to_count_map: HashMap<usize, usize> = HashMap::new();
+        for &c in containers_vec.iter() {
+            *container_size_to_count_map.entry(c).or_insert(0) += 1;
         }
-        let mut size_vec: Vec<(usize, usize)> = size_map.iter().map(|(size, count)| (*size, *count)).collect();
-        size_vec.sort_by(|a, b| b.0.cmp(&a.0));
+        let mut container_size_and_count_vec: Vec<(usize, usize)> = container_size_to_count_map.iter().map(|(size, count)| (*size, *count)).collect();
+        container_size_and_count_vec.sort_by(|a, b| b.0.cmp(&a.0));
 
-        let mut liquids: Vec<usize> = self
+        let mut liquid_size_vec: Vec<usize> = self
             .get_available_colors_with_count()
             .iter()
             .map(|(_, count)| *count)
             .collect();
-        if *liquids.iter().max().unwrap_or(&0) > self.get_empty_spaces_count() {
-            liquids.push(self.get_empty_spaces_count());
+        if *liquid_size_vec.iter().max().unwrap_or(&0) > self.get_empty_spaces_count() {
+            liquid_size_vec.push(self.get_empty_spaces_count());
         }
-        let liquid_sizes: HashSet<usize> = liquids.iter().copied().collect();
-        let mut ways_to_get_liquids: HashMap<usize,Vec<HashMap<usize,usize>>> = HashMap::with_capacity(liquid_sizes.len());
-        for &liquid in liquid_sizes.iter() {
+        let liquid_sizes_set: HashSet<usize> = liquid_size_vec.iter().copied().collect();
+        let mut ways_to_get_liquids: HashMap<usize,Vec<HashMap<usize,usize>>> = HashMap::with_capacity(liquid_sizes_set.len());
+        for &liquid in liquid_sizes_set.iter() {
             ways_to_get_liquids.insert(liquid, Vec::new());
         }
+        debug!("Enumerating subsets to target sizes: {:?}", liquid_sizes_set);
         Self::enumerate_subsets_to_target_size(
-            &size_vec,
-            &mut HashMap::with_capacity(size_map.len()), 
+            &container_size_and_count_vec,
+            &mut HashMap::with_capacity(container_size_to_count_map.len()), 
             0,
-            &liquid_sizes,
-            *liquid_sizes.iter().max().unwrap_or(&0),
+            &liquid_sizes_set,
+            *liquid_sizes_set.iter().max().unwrap_or(&0),
             0,
             &mut ways_to_get_liquids,
         );
+
+        // Simplify by applying forced choices
+        loop {
+            if ways_to_get_liquids.values().any(|v| v.is_empty()) {
+                debug!("No ways to get some liquids, unsolvable.");
+                return false;
+            }
+            let single_option = ways_to_get_liquids.iter().find(|(_, v)| v.len() == 1);
+            if single_option.is_none() {
+                break;
+            }
+            let (liquid_size, ways) = single_option.unwrap();
+            let liquid_size = *liquid_size;
+            let way = ways[0].clone();
+            for (key, other_solution_set) in ways_to_get_liquids.iter_mut() {
+                if *key == liquid_size {
+                    continue;
+                }
+                for solution in other_solution_set.iter_mut() {
+                    for (used_size, used_count) in way.iter() {
+                        let entry = solution.entry(*used_size).or_insert(0);
+                        if *entry >= *used_count {
+                            *entry -= *used_count;
+                        }
+                        else {
+                            debug!("Applying forced choices led to contradiction, unsolvable.");
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
         debug!("Solving");
         let mut lengths = ways_to_get_liquids.iter().map(|(k,v)| (*k, v.len())).collect::<Vec<(usize, usize)>>();
         lengths.sort_by(|a, b| a.1.cmp(&b.1));
         debug!("Ways to get liquids sizes: {:?}", lengths);
-        self.recursive_is_solvable(
+        Self::recursive_is_solvable(
             &ways_to_get_liquids,
-            size_map,
-            &liquids
+            container_size_to_count_map,
+            &liquid_size_vec,
         )
     }
 
-    fn recursive_is_solvable(&self, ways_to_get_liquids: &HashMap<usize, Vec<HashMap<usize, usize>>>, remaining_container_sizes: HashMap<usize, usize>, liquids: &[usize]) -> bool {
-
-        if liquids.is_empty() {
+    fn recursive_is_solvable(
+        ways_to_get_liquids: &HashMap<usize, Vec<HashMap<usize, usize>>>,
+        remaining_container_sizes: HashMap<usize, usize>,
+        liquid_sizes: &[usize],
+    ) -> bool {
+        if liquid_sizes.is_empty() {
             debug!("All liquids have been successfully matched.");
             return true;
         }
-        let current_liquid = liquids[0];
-        if let Some(ways) = ways_to_get_liquids.get(&current_liquid) {
-            'way_loop: for way in ways {
-                let mut new_remaining_sizes = remaining_container_sizes.clone();
-                for (size, count) in way.iter() {
-                    let entry = new_remaining_sizes.entry(*size).or_insert(0);
-                    if *entry < *count {
-                        continue 'way_loop;
-                    }
-                    *entry -= *count;
+
+        let current_liquid = liquid_sizes[0];
+        let Some(ways) = ways_to_get_liquids.get(&current_liquid) else {
+            return false;
+        };
+
+        // Explore each possible container-subset choice in parallel.
+        // `any()` short-circuits: as soon as one branch returns true, the whole call returns true.
+        ways.par_iter().any(|way| {
+            let mut new_remaining_container_sizes = remaining_container_sizes.clone();
+
+            for (size, count) in way.iter() {
+                let entry = new_remaining_container_sizes.entry(*size).or_insert(0);
+                if *entry < *count {
+                    return false;
                 }
-                if self.recursive_is_solvable(ways_to_get_liquids, new_remaining_sizes, &liquids[1..]) {
-                    return true;
-                }
+                *entry -= *count;
             }
-        }
-        false
+
+            Self::recursive_is_solvable(ways_to_get_liquids, new_remaining_container_sizes, &liquid_sizes[1..])
+        })
     }
 }
 
