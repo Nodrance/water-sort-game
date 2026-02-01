@@ -495,7 +495,6 @@ impl GameState {
         let from = action.from_container;
         let to = action.to_container;
         let amount = action.amount;
-        debug!("Applying reverse move: from {} to {} amount {}", from, to, amount);
         if from < to {
             let (left, right) = self.fluid_containers.split_at_mut(to);
             left[from].reverse_pour_into(&mut right[0], amount);

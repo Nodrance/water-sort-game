@@ -3,6 +3,7 @@ use std::vec;
 use crate::model::*;
 use crate::renderer::Renderer;
 use clipboard_rs::{Clipboard, ClipboardContext};
+use macroquad::prelude::debug;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Selection {
@@ -186,11 +187,16 @@ impl GameEngine {
                     return;
                 }
                 self.push_undo_state();
+                let current_entropy = self.state.get_entropy();
                 self.state.apply_move(&MoveAction {
                     from_container: from,
                     to_container: to,
                     amount: 0,
                 });
+                let new_entropy = self.state.get_entropy();
+                if new_entropy >= current_entropy {
+                    debug!("Congrats you found a move that doesn't decrease entropy!");
+                }
             }
             ControlAction::Undo => {
                 self.undo();
@@ -254,11 +260,16 @@ impl GameEngine {
                     return;
                 }
                 self.push_undo_state();
+                let current_entropy = self.state.get_entropy();
                 self.state.apply_reverse_move(&MoveAction {
                     from_container: from,
                     to_container: to,
                     amount,
                 });
+                let new_entropy = self.state.get_entropy();
+                if new_entropy <= current_entropy {
+                    debug!("Congrats you found a move that doesn't increase entropy!");
+                }
             }
             ControlAction::ShuffleState => {
                 self.push_undo_state();
